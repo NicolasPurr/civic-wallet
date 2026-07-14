@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+
+    <script>
+
+	window.addEventListener('error', function(e) {
+        console.error("Intercepted top-level error: " + e.message);
+        if (window.AndroidBridge) {
+            AndroidBridge.onError("JS Compile/Link Error: " + e.message + " inside " + e.filename);
+        }
+    });
+
+    window.addEventListener('unhandledrejection', function(e) {
+        console.error("Intercepted unhandled rejection: " + e.reason);
+        if (window.AndroidBridge) {
+            AndroidBridge.onError("JS Async Promise Rejection: " + e.reason);
+        }
+    });
+
+    </script>
+
+    <script src="circuit.js"></script>
+
+    <title>ZK CBDC Payment Gateway Bridge</title>
+  <script type="module" crossorigin src="./assets/index-BK2z_Mb2.js"></script>
+</head>
+<body>
+<div id="status">ZK Execution Context Active</div>
+</body>
+</html>

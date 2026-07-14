@@ -1,0 +1,20 @@
+# Kotlin 2.0+ Compiler Cache
+.kotlin/
+
+# Gradle Build Caches & Temp Artifacts
+.gradle/
+build/
+**/build/
+
+# Local Android SDK Paths
+local.properties
+
+# Android Studio & IntelliJ IDEA config files
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# OS Specific Temporary Files
+.DS_Store
+Thumbs.db

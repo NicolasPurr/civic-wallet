@@ -1,0 +1,23 @@
+# Kotlin 2.0+ Compiler Caches
+.kotlin/
+**/android/.kotlin/
+
+# Gradle Build Caches & Outputs
+.gradle/
+**/build/
+
+# Local Android Configuration
+**/local.properties
+
+# Rust / Cargo Build Outputs
+**/target/
+**/*.rs.bk
+
+# IDE Configurations (Android Studio & VS Code)
+.idea/
+.vscode/
+*.iml
+
+# OS Temporary Files
+.DS_Store
+Thumbs.db
