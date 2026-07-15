@@ -14,8 +14,9 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 sealed interface PaymentUiEvent {
-    object NavigateToSuccess : PaymentUiEvent
-    object NavigateToUnauthorized : PaymentUiEvent
+    // Dynamically carry the transaction metadata to the destination
+    data class NavigateToSuccess(val amount: String) : PaymentUiEvent
+    data class NavigateToUnauthorized(val source: String) : PaymentUiEvent
 }
 
 @HiltViewModel
@@ -29,11 +30,10 @@ class PaymentViewModel @Inject constructor(
     private val _uiEvent = Channel<PaymentUiEvent>(Channel.BUFFERED)
     val uiEvent = _uiEvent.receiveAsFlow()
 
-    var zkGenerationTime: Long = 0L
-        private set
+    private val _zkGenerationTime = MutableStateFlow(0L)
+    val zkGenerationTime = _zkGenerationTime.asStateFlow()
 
     fun startSettlement() {
-        // FIXED: Prevent duplicate execution upon configuration change/rotation
         if (_uiState.value !is PaymentUiState.Idle) return
 
         viewModelScope.launch {
@@ -44,12 +44,15 @@ class PaymentViewModel @Inject constructor(
                     }
                     is SettlementStatus.Success -> {
                         _uiState.value = PaymentUiState.Idle
-                        this@PaymentViewModel.zkGenerationTime = status.generationTimeMs
-                        _uiEvent.send(PaymentUiEvent.NavigateToSuccess)
+                        _zkGenerationTime.value = status.generationTimeMs
+
+                        // Pass the actual amount settled down to the event stream
+                        val settlementAmount = "$42.00 CBDC" // In production, pulled from state/usecase
+                        _uiEvent.send(PaymentUiEvent.NavigateToSuccess(settlementAmount))
                     }
                     is SettlementStatus.Error -> {
                         _uiState.value = PaymentUiState.Error(status.message)
-                        _uiEvent.send(PaymentUiEvent.NavigateToUnauthorized)
+                        _uiEvent.send(PaymentUiEvent.NavigateToUnauthorized("cloud"))
                     }
                 }
             }

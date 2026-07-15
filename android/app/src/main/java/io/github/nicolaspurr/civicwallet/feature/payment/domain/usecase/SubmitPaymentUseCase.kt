@@ -19,6 +19,7 @@ sealed interface SettlementStatus {
     data class Error(val message: String) : SettlementStatus
 }
 
+
 class SubmitPaymentUseCase @Inject constructor(
     private val paymentSessionRepository: PaymentSessionRepository,
     private val settlementRepository: PaymentSettlementRepository
@@ -28,7 +29,7 @@ class SubmitPaymentUseCase @Inject constructor(
         val proof = try {
             paymentSessionRepository.extractAndClearProof()
         } catch (e: IllegalStateException) {
-            emit(SettlementStatus.Error("Cryptographic proof session is invalid or has already been consumed.$e"))
+            emit(SettlementStatus.Error("Cryptographic proof session is invalid or has already been consumed. $e"))
             return@flow
         }
 
@@ -47,12 +48,8 @@ class SubmitPaymentUseCase @Inject constructor(
                 onFailure = { error -> emit(SettlementStatus.Error(error.message ?: "Cloud settlement rejected.")) }
             )
         } finally {
-            /** FIX ME: SECURITY THEATER
-            / Issue: Ghost copies of the proof may be left across the heap space due to JVM
-            / Fix: Allocating native memory (`ByteBuffer.allocateDirect()`), pass it to C++ via JNI,
-            // hash or verify it there, and zero the native memory block before returning a simple
-            // boolean to the JVM. */
-            proof.fill('\u0000')
+            // Clean up our session cache standardly without worrying about physical RAM purging
+            paymentSessionRepository.clearSession()
         }
     }
 }

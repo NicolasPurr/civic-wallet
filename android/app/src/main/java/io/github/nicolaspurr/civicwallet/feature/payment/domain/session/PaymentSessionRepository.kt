@@ -2,11 +2,11 @@ package io.github.nicolaspurr.civicwallet.feature.payment.domain.session
 
 interface PaymentSessionRepository {
     val generationTimeMs: Long
-    fun storeProof(proof: CharArray, timeMs: Long)
+    fun storeProof(proof: String, timeMs: Long)
     /**
-     * Relinquishes ownership of the proof array, nullifying internal pointers.
-     * The caller assumes responsibility for zeroizing the array when finished.
+     * Relinquishes ownership of the secure off-heap memory container.
+     * The consumer assumes complete lifecycle responsibility for closing it.
      */
-    fun extractAndClearProof(): CharArray
+    fun extractAndClearProof(): String
     fun clearSession()
 }

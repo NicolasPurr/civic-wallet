@@ -9,16 +9,15 @@ import kotlin.time.Duration.Companion.milliseconds
 @Singleton
 class PaymentSettlementRepositoryImpl @Inject constructor() : PaymentSettlementRepository {
 
-    override suspend fun submitZkProof(proof: CharArray): Result<Unit> {
-        // Move the simulation/network work safely to the data layer where it belongs
-        delay(1500.milliseconds)
+    override suspend fun submitZkProof(proof: String): Result<Unit> {
+        delay(1500.milliseconds) // Network delay simulation
 
-        val networkSettlementSuccess = true // Hook in your real RPC/API client here
+        val networkSettlementSuccess = true
 
         return if (networkSettlementSuccess) {
             Result.success(Unit)
         } else {
-            Result.failure(Exception("Cloud settlement rejected the ZK proof."))
+            Result.failure(Exception("Cloud settlement server rejected structural ZK constraints."))
         }
     }
 }

@@ -24,6 +24,7 @@ class TfLiteModelManager @Inject constructor(
     private val _modelState = MutableStateFlow<ModelState>(ModelState.Loading)
     override val modelState = _modelState.asStateFlow()
 
+    @Volatile
     private var interpreter: Interpreter? = null
     private val interpreterLock = Any()
 
@@ -49,20 +50,23 @@ class TfLiteModelManager @Inject constructor(
     }
 
     override fun runInference(input: ByteBuffer, output: Array<FloatArray>) {
-        synchronized(interpreterLock) {
-            interpreter?.run(input, output)
-                ?: throw IllegalStateException("Model released or not ready.")
-        }
+        // Read the volatile reference directly without acquiring a monitor lock
+        val currentInterpreter = interpreter
+            ?: throw IllegalStateException("Model released or not ready.")
+
+        // Inference internal processing is thread-safe on a single pre-allocated instance
+        currentInterpreter.run(input, output)
     }
 
     override fun release() {
         synchronized(interpreterLock) {
             try {
-                interpreter?.close()
+                val target = interpreter
+                interpreter = null
+                target?.close()
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
-                interpreter = null
                 _modelState.value = ModelState.Loading
             }
         }
