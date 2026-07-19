@@ -114,7 +114,7 @@ class ArchitectureTest {
         Konsist.scopeFromProduction()
             .classes()
             .withNameEndingWith("UseCase")
-            .assertTrue { it.resideInPackage("..domain.usecase..") }
+            .assertTrue { it.resideInPackage("..domain.interactor..") }
     }
 
     @Test

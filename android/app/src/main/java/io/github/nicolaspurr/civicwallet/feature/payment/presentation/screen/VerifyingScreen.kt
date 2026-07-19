@@ -18,7 +18,7 @@ import io.github.nicolaspurr.civicwallet.feature.payment.presentation.PaymentUiS
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle // Modern lifecycle-aware collector
 import androidx.lifecycle.flowWithLifecycle
-import io.github.nicolaspurr.civicwallet.feature.payment.domain.usecase.SettlementStep
+import io.github.nicolaspurr.civicwallet.feature.payment.domain.interactor.SettlementStep
 
 @Composable
 fun VerifyingScreen(

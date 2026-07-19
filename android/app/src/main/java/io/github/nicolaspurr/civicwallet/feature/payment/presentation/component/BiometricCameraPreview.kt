@@ -8,12 +8,12 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -38,7 +38,6 @@ fun BiometricCameraPreview(
     val lifecycleOwner = LocalLifecycleOwner.current
     val previewView = remember { PreviewView(context) }
 
-    // Resolve dependencies directly from the application context entry point
     val entryPoint = remember(context) {
         EntryPointAccessors.fromApplication(
             context.applicationContext,
@@ -49,36 +48,43 @@ fun BiometricCameraPreview(
     val analyzer = remember(entryPoint) { entryPoint.faceAnalyzer() }
     val cameraExecutor = remember(entryPoint) { entryPoint.cameraExecutor() }
 
+    // Resolve camera provider
+    val cameraProvider = remember { ProcessCameraProvider.getInstance(context).get() }
+
     LaunchedEffect(analyzer, cameraExecutor, lifecycleOwner) {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        try {
+            val preview = Preview.Builder().build().apply {
+                surfaceProvider = previewView.surfaceProvider
+            }
 
-        cameraProviderFuture.addListener({
-            try {
-                val cameraProvider = cameraProviderFuture.get()
-
-                val preview = Preview.Builder().build().apply {
-                    surfaceProvider = previewView.surfaceProvider
+            val imageAnalysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                .build().apply {
+                    setAnalyzer(cameraExecutor, analyzer)
                 }
 
-                val imageAnalysis = ImageAnalysis.Builder()
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                    .build().apply {
-                        // Passing the DI managed background thread pool directly to CameraX
-                        setAnalyzer(cameraExecutor, analyzer)
-                    }
+            cameraProvider.unbindAll()
+            cameraProvider.bindToLifecycle(
+                lifecycleOwner,
+                CameraSelector.DEFAULT_FRONT_CAMERA,
+                preview,
+                imageAnalysis
+            )
+        } catch (e: Exception) {
+            Log.e("BiometricCameraPreview", "Failed to bind CameraX", e)
+        }
+    }
 
+    // Fix: Explicitly unbind the camera pipeline when UI is unmounted
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
-                    lifecycleOwner,
-                    CameraSelector.DEFAULT_FRONT_CAMERA,
-                    preview,
-                    imageAnalysis
-                )
             } catch (e: Exception) {
-                Log.e("BiometricCameraPreview", "Failed to initialize CameraX pipelines", e)
+                Log.e("BiometricCameraPreview", "Error cleaning up CameraX", e)
             }
-        }, ContextCompat.getMainExecutor(context))
+        }
     }
 
     AndroidView(

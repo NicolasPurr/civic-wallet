@@ -6,36 +6,63 @@ import io.github.nicolaspurr.civicwallet.core.ml.ModelManager
 import io.github.nicolaspurr.civicwallet.core.ml.ModelState
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.BiometricSessionOrchestrator
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.SessionState
-import io.github.nicolaspurr.civicwallet.feature.payment.domain.usecase.GenerateAndStoreZkProofUseCase
+import io.github.nicolaspurr.civicwallet.feature.payment.domain.interactor.ZkProofInteractor
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.io.Closeable
 import javax.inject.Inject
 import javax.inject.Named
 
+/**
+ * Implementation of [BiometricSessionOrchestrator] coordinating ML and biometrics.
+ *
+ * ### Concurrency Architecture
+ * Since biometric data updates frequently from a sensor background thread and ML states can mutate
+ * asynchronously, this class uses [Mutex] serialization ([stateMutex]) to guard its internal
+ * variables.
+ *
+ * All asynchronous workloads are executed within a custom [orchestratorScope] isolated to the
+ * passed [defaultDispatcher] (ideally `Dispatchers.Default` for CPU-heavy tasks).
+ *
+ * This class implements [Closeable] to prevent resource leaks when the orchestrator is cleared by
+ * the dependency injection container or lifecycle owner.
+ *
+ * @param modelManager Handles physical RAM loading/unloading of the ML interpreter model.
+ * @param authenticator Stream adapter bridging system biometric sensors.
+ * @param zkProofInteractor The execution pipeline for generating the ZK proof.
+ * @param defaultDispatcher Coroutine dispatcher designed to absorb CPU-heavy calculations.
+ * @param triggerThreshold The confidence target (0.0 - 1.0) required for proof generation.
+ */
 class BiometricSessionOrchestratorImpl @Inject constructor(
     private val modelManager: ModelManager,
     private val authenticator: BiometricAuthenticator,
-    private val generateAndStoreZkProofUseCase: GenerateAndStoreZkProofUseCase,
+    private val zkProofInteractor: ZkProofInteractor,
     @param:DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher,
-    @param:Named("TriggerThreshold") private val triggerThreshold: Float // Inject threshold
-) : BiometricSessionOrchestrator {
+    @param:Named("TriggerThreshold") private val triggerThreshold: Float
+) : BiometricSessionOrchestrator, Closeable {
 
     private val _sessionState = MutableStateFlow<SessionState>(SessionState.Idle)
     override val sessionState: StateFlow<SessionState> = _sessionState.asStateFlow()
 
+    /** Root coroutine scope bound to the life of the orchestrator instance. */
     private val orchestratorScope = CoroutineScope(SupervisorJob() + defaultDispatcher)
+
+    /** References the single active running session job; canceled on [stop] or [reset]. */
     private var activeJob: Job? = null
 
-    // HARDENED: Replaces loose AtomicBoolean variables to prevent parallel state mutation
+    /** Locks state updates to prevent race conditions from rapid biometric data streams. */
     private val stateMutex = Mutex()
+
+    /** Manages physical RAM interpreter loading state. */
     private var isModelReady = false
 
     override fun start() {
@@ -43,18 +70,28 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
 
         activeJob = orchestratorScope.launch {
             _sessionState.value = SessionState.Initializing
-            modelManager.initialize()
 
+            // Acquire the state mutex during initialization to prevent execution race
+            // conditions with asynchronous model releases called via stop().
+            stateMutex.withLock {
+                modelManager.initialize()
+            }
+
+            // Sub-job A: Monitor ML model state transitions
             launch {
                 modelManager.modelState.collect { state ->
                     stateMutex.withLock {
                         when (state) {
-                            is ModelState.Loading -> _sessionState.value = SessionState.Initializing
+                            is ModelState.Loading -> {
+                                isModelReady = false // Hardened state safety
+                                _sessionState.value = SessionState.Initializing
+                            }
                             is ModelState.Ready -> {
                                 isModelReady = true
                                 _sessionState.value = SessionState.Ready(0f)
                             }
                             is ModelState.Error -> {
+                                isModelReady = false // Hardened state safety
                                 _sessionState.value = SessionState.Error("Model Init Failed: ${state.message}")
                             }
                         }
@@ -62,6 +99,7 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
                 }
             }
 
+            // Sub-job B: Monitor live biometric confidence signals
             launch {
                 authenticator.confidenceFlow.collect { rawScore ->
                     stateMutex.withLock {
@@ -70,11 +108,10 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
                             val clampedScore = rawScore.coerceIn(0f, 1f)
 
                             if (clampedScore >= triggerThreshold) {
-                                // State change prevents any concurrent frame processing
                                 _sessionState.value = SessionState.GeneratingProof
-
-                                // Execute prover asynchronously without blocking mutex flow
-                                orchestratorScope.launch {
+                                // Launching within Sub-job B's child scope guarantees that
+                                // canceling activeJob will cascade and cancel the proof pipeline.
+                                launch {
                                     executeProofPipeline(clampedScore)
                                 }
                             } else {
@@ -87,8 +124,12 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
         }
     }
 
+    /**
+     * Executes the ZK computation pipeline asynchronously.
+     */
     private suspend fun executeProofPipeline(confidence: Float) {
-        generateAndStoreZkProofUseCase.execute(confidence)
+        // Execute without lock to keep the orchestrator loop unblocked
+        zkProofInteractor.execute(confidence)
             .onSuccess {
                 stateMutex.withLock {
                     _sessionState.value = SessionState.ProofGenerated
@@ -119,10 +160,21 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
         activeJob?.cancel()
         activeJob = null
         orchestratorScope.launch {
+            // Running release inside the lock ensures sequential thread-safety
             stateMutex.withLock {
+                isModelReady = false
                 _sessionState.value = SessionState.Idle
+                modelManager.release()
             }
-            modelManager.release()
         }
+    }
+
+    /**
+     * Cleanly shuts down the orchestrator, cancels all ongoing calculations, and terminates
+     * the root coroutine scope to eliminate potential memory and thread leaks.
+     */
+    override fun close() {
+        stop()
+        orchestratorScope.cancel()
     }
 }

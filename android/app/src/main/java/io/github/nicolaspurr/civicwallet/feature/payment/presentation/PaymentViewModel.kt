@@ -2,10 +2,10 @@ package io.github.nicolaspurr.civicwallet.feature.payment.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import io.github.nicolaspurr.civicwallet.feature.payment.domain.usecase.SettlementStatus
-import io.github.nicolaspurr.civicwallet.feature.payment.domain.usecase.SubmitPaymentUseCase
+import io.github.nicolaspurr.civicwallet.feature.payment.domain.interactor.SettlementStatus
+import io.github.nicolaspurr.civicwallet.feature.payment.domain.interactor.PaymentSettlementInteractor
 import dagger.hilt.android.lifecycle.HiltViewModel
-import io.github.nicolaspurr.civicwallet.feature.payment.domain.usecase.SettlementStep
+import io.github.nicolaspurr.civicwallet.feature.payment.domain.interactor.SettlementStep
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,7 +21,7 @@ sealed interface PaymentUiEvent {
 
 @HiltViewModel
 class PaymentViewModel @Inject constructor(
-    private val submitPaymentUseCase: SubmitPaymentUseCase
+    private val paymentSettlementInteractor: PaymentSettlementInteractor
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<PaymentUiState>(PaymentUiState.Idle)
@@ -37,7 +37,7 @@ class PaymentViewModel @Inject constructor(
         if (_uiState.value !is PaymentUiState.Idle) return
 
         viewModelScope.launch {
-            submitPaymentUseCase.execute().collect { status ->
+            paymentSettlementInteractor.execute().collect { status ->
                 when (status) {
                     is SettlementStatus.Verifying -> {
                         _uiState.value = PaymentUiState.Verifying(status.step)
@@ -47,7 +47,7 @@ class PaymentViewModel @Inject constructor(
                         _zkGenerationTime.value = status.generationTimeMs
 
                         // Pass the actual amount settled down to the event stream
-                        val settlementAmount = "$42.00 CBDC" // In production, pulled from state/usecase
+                        val settlementAmount = "$42.00 CBDC" // In production, pulled from state/interactor
                         _uiEvent.send(PaymentUiEvent.NavigateToSuccess(settlementAmount))
                     }
                     is SettlementStatus.Error -> {

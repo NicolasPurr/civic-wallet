@@ -6,19 +6,25 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.tensorflow.lite.Interpreter
 import java.io.File
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.locks.ReentrantReadWriteLock
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.concurrent.read
+import kotlin.concurrent.write
 
 @Singleton
 class TfLiteModelManager @Inject constructor(
     @param:ApplicationContext private val context: Context,
-    @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher // Injected dispatcher
+    @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) : ModelManager {
 
     private val _modelState = MutableStateFlow<ModelState>(ModelState.Loading)
@@ -26,48 +32,70 @@ class TfLiteModelManager @Inject constructor(
 
     @Volatile
     private var interpreter: Interpreter? = null
-    private val interpreterLock = Any()
+
+    // Real Security & Concurrency Fix: Protects native C++ memory access
+    private val rwLock = ReentrantReadWriteLock()
+
+    // Real Concurrency Fix: Serializes concurrent initialize and release sequences
+    private val initMutex = Mutex()
+
+    // Real Concurrency Fix: Reference counter of active components holding the model
+    private val activeClients = AtomicInteger(0)
 
     override suspend fun initialize() {
-        if (_modelState.value is ModelState.Ready) return
-        _modelState.value = ModelState.Loading
+        // Increment client reservation immediately
+        activeClients.incrementAndGet()
 
-        // Executing on injected dispatcher for predictable unit testing
-        withContext(ioDispatcher) {
-            try {
-                val modelBuffer = loadModelBuffer()
-                val options = Interpreter.Options().apply { setNumThreads(4) }
+        initMutex.withLock {
+            if (_modelState.value is ModelState.Ready) return
+            _modelState.value = ModelState.Loading
 
-                synchronized(interpreterLock) {
-                    interpreter = Interpreter(modelBuffer, options)
+            withContext(ioDispatcher) {
+                try {
+                    val modelBuffer = loadModelBuffer()
+                    val options = Interpreter.Options().apply { setNumThreads(4) }
+
+                    // Acquire write lock to cleanly instantiate the new native pointer
+                    rwLock.write {
+                        interpreter = Interpreter(modelBuffer, options)
+                    }
+
+                    _modelState.value = ModelState.Ready
+                } catch (e: Exception) {
+                    activeClients.decrementAndGet()
+                    _modelState.value = ModelState.Error(e.localizedMessage ?: "Failed to load model.")
                 }
-
-                _modelState.value = ModelState.Ready
-            } catch (e: Exception) {
-                _modelState.value = ModelState.Error(e.localizedMessage ?: "Failed to load model.")
             }
         }
     }
 
     override fun runInference(input: ByteBuffer, output: Array<FloatArray>) {
-        // Read the volatile reference directly without acquiring a monitor lock
-        val currentInterpreter = interpreter
-            ?: throw IllegalStateException("Model released or not ready.")
-
-        // Inference internal processing is thread-safe on a single pre-allocated instance
-        currentInterpreter.run(input, output)
+        // Acquire read lock so release() cannot run mid-inference on another thread
+        rwLock.read {
+            val currentInterpreter = interpreter
+                ?: throw IllegalStateException("Model released or not ready.")
+            currentInterpreter.run(input, output)
+        }
     }
 
     override fun release() {
-        synchronized(interpreterLock) {
-            try {
-                val target = interpreter
-                interpreter = null
-                target?.close()
-            } catch (e: Exception) {
-                e.printStackTrace()
-            } finally {
-                _modelState.value = ModelState.Loading
+        // Decrement client count. Only release physical resources if no screens are using it.
+        val remainingClients = activeClients.decrementAndGet()
+
+        if (remainingClients <= 0) {
+            activeClients.set(0) // Prevent negative values in edge cases
+
+            // Acquire write lock to prevent closing the interpreter during active inference
+            rwLock.write {
+                try {
+                    val target = interpreter
+                    interpreter = null
+                    target?.close()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                } finally {
+                    _modelState.value = ModelState.Loading
+                }
             }
         }
     }
