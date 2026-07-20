@@ -1,7 +1,7 @@
 package io.github.nicolaspurr.civicwallet.feature.payment.data.di
 
 import io.github.nicolaspurr.civicwallet.feature.payment.data.session.PaymentSessionRepositoryImpl
-import io.github.nicolaspurr.civicwallet.feature.payment.data.session.FakePaymentSettlementRepository
+import io.github.nicolaspurr.civicwallet.feature.payment.data.session.PaymentSettlementRepositoryImpl
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.PaymentSessionRepository
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.PaymentSettlementRepository
 import dagger.Binds
@@ -36,16 +36,16 @@ abstract class PaymentDataModule {
     /**
      * Binds the settlement repository implementation.
      *
-     * **Important:** This currently binds [FakePaymentSettlementRepository], which simulates
+     * **Important:** This currently binds [PaymentSettlementRepository], which simulates
      * network delays and returns mocked success results. Ensure this is swapped out for a
      * production-ready client before production.
      *
-     * @param impl The simulated [FakePaymentSettlementRepository] instance.
+     * @param impl The simulated [PaymentSettlementRepository] instance.
      * @return The bound [PaymentSettlementRepository] abstraction.
      */
     @Binds
     @Singleton
     abstract fun bindPaymentSettlementRepository(
-        impl: FakePaymentSettlementRepository
+        impl: PaymentSetllementRepository
     ): PaymentSettlementRepository
 }

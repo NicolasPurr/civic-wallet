@@ -112,4 +112,10 @@ dependencies {
     // JVM Unit Testing dependencies
     testImplementation("io.mockk:mockk:1.14.11")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
+
+    // Add the Java Native Access library for Android
+    implementation("net.java.dev.jna:jna:5.14.0@aar")
+
+    // Ensure you also have the standard coroutines dependency if not already present
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
 }
