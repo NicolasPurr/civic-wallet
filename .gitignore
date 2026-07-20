@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Kotlin 2.0+ Compiler Caches
 .kotlin/
 **/android/.kotlin/
@@ -21,3 +22,7 @@
 # OS Temporary Files
 .DS_Store
 Thumbs.db
+=======
+zk-verification-server/payload.json
+zk-verification-server/verification_key.json
+>>>>>>> origin/module-zk-verification-server
