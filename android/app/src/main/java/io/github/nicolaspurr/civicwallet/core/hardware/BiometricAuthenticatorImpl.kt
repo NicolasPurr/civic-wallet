@@ -8,10 +8,14 @@ import javax.inject.Singleton
 @Singleton
 class BiometricAuthenticatorImpl @Inject constructor() : BiometricAuthenticator, BiometricAuthSink {
 
-    private val _confidenceFlow = MutableSharedFlow<Float>(extraBufferCapacity = 64)
+    // Capacity of 0 with DROP_OLDEST means no stale scores are ever buffered in RAM
+    private val _confidenceFlow = MutableSharedFlow<Float>(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
+    )
     override val confidenceFlow = _confidenceFlow.asSharedFlow()
 
-    // Internal Data Layer bridge method - not exposed to the Domain interface.
     override fun emitConfidence(score: Float) {
         _confidenceFlow.tryEmit(score)
     }

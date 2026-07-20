@@ -8,11 +8,16 @@ import javax.inject.Inject
 
 /**
  * Represents the distinct steps in the remote payment settlement process.
- * These steps can be mapped directly to UI progress indicators.
+ * * These steps can be mapped directly to UI progress indicators.
  */
 enum class SettlementStep {
+    /** Preparing the localized transaction details and proof reference. */
     INITIALIZING,
+
+    /** Transmitting the ZK proof payload to the remote ledger or cloud server. */
     SUBMITTING_PROOF,
+
+    /** Waiting for the cloud verifier to validate structural constraints of the proof. */
     VERIFYING_CONSTRAINTS,
 }
 
@@ -20,6 +25,10 @@ enum class SettlementStep {
  * Sealed status representing the states of a payment submission.
  */
 sealed interface SettlementStatus {
+    /**
+     * The settlement is actively processing.
+     * @property step The current active [SettlementStep].
+     */
     data class Verifying(val step: SettlementStep) : SettlementStatus
 
     /**
@@ -44,9 +53,16 @@ class PaymentSettlementInteractor @Inject constructor(
     private val paymentSessionRepository: PaymentSessionRepository,
     private val settlementRepository: PaymentSettlementRepository
 ) {
-
+    /**
+     * Executes the payment settlement sequence, emitting progress statuses reactively.
+     *
+     * This returns a **cold** [Flow]. The sequence of operations (including reading
+     * from the memory) does not begin until a collector starts gathering emissions.
+     *
+     * @return A cold [Flow] streaming the transactional [SettlementStatus].
+     */
     fun execute(): Flow<SettlementStatus> = flow {
-        // Capture the local benchmark timing before session termination clears it
+        // Capture the benchmark timing before session termination clears it
         val generationTimeMs = paymentSessionRepository.generationTimeMs
 
         // Destructive read of the ZK proof

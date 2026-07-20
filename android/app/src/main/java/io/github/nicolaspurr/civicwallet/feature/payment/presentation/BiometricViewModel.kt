@@ -1,7 +1,6 @@
 package io.github.nicolaspurr.civicwallet.feature.payment.presentation
 
 import android.annotation.SuppressLint
-import androidx.camera.core.ImageAnalysis
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.BiometricSessionOrchestrator
@@ -17,8 +16,7 @@ import kotlin.time.Duration.Companion.milliseconds
 
 @HiltViewModel
 class BiometricViewModel @Inject constructor(
-    private val orchestrator: BiometricSessionOrchestrator,
-    val faceAnalyzer: ImageAnalysis.Analyzer
+    private val orchestrator: BiometricSessionOrchestrator
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<BiometricUiState>(BiometricUiState.Initializing)
