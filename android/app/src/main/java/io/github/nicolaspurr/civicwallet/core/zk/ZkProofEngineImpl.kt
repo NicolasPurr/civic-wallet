@@ -2,56 +2,110 @@ package io.github.nicolaspurr.civicwallet.core.zk
 
 import io.github.nicolaspurr.civicwallet.core.di.DefaultDispatcher
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import uniffi.mopro.ProofLib
+import uniffi.mopro.generateCircomProof
+import uniffi.mopro.verifyCircomProof
 import javax.inject.Inject
-import javax.inject.Singleton
 import kotlin.system.measureTimeMillis
-import kotlin.time.Duration.Companion.milliseconds
-import java.util.Locale
+import android.util.Log
 
-@Singleton
+/**
+ * Native cryptographic bridge for MoPro zero-knowledge proofs.
+ *
+ * Injected via CoreModule. Bound to @DefaultDispatcher to ensure heavy FFI
+ * execution does not block the main thread or UI orchestrators.
+ */
 class ZkProofEngineImpl @Inject constructor(
-    @param:DefaultDispatcher private val dispatcher: CoroutineDispatcher
+    @param:DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher
 ) : ZkProofEngine {
 
-    override suspend fun generateProof(confidence: Float): Result<ZkProofResult> = withContext(dispatcher) {
-        val clamped = confidence.coerceIn(0f, 1f)
+    override suspend fun generateProof(confidence: Float): Result<ZkProofResult> = withContext(defaultDispatcher) {
+        runCatching {
+            // Prepare circuit inputs
+            // MoPro expects a JSON string mapping for Circom inputs.
+            // We scale the float confidence to an integer for the circuit.
+            // THIS WILL NOT BE NEEDEd
+            val scaledConfidence = (confidence * 100).toInt()
+            val circuitInputsJson = """{"confidence": ["$scaledConfidence"]}"""
 
-        var witnessTime = 0L
-        var provingTime = 0L
+            // Define asset paths
+            // CRITICAL: Rust cannot read directly from Android APK assets via standard I/O.
+            // For this emulator test, use `adb push` to place the .zkey in a readable directory,
+            // or copy it from assets to `context.filesDir` on app launch.
+            val zkeyPath = "/data/local/tmp/cbdc.zkey"
 
-        try {
-            witnessTime = measureTimeMillis { delay(800L.milliseconds) }
-            provingTime = measureTimeMillis { delay(1200L.milliseconds) }
+            var proofResult: uniffi.mopro.CircomProofResult? = null
 
-            // Standardize format to 4 decimal places
-            val formattedConfidence = String.format(Locale.US, "%.4f", clamped)
+            // Benchmark proof generation (witness + proving)
+            val generationTimeMs = measureTimeMillis {
+                proofResult = generateCircomProof(
+                    zkeyPath = zkeyPath,
+                    circuitInputs = circuitInputsJson,
+                    proofLib = ProofLib.ARKWORKS // Use ARKWORKS for emulator compatibility
+                )
+            }
 
-            // Pure, legible, standard JSON payload
-            val jsonPayload = """
-                {
-                  "protocol": "groth16",
-                  "proof": {
-                    "a": ["0x1", "0x2"],
-                    "b": [["0x3", "0x4"], ["0x5", "0x6"]],
-                    "c": ["0x7", "0x8"]
-                  },
-                  "inputs": ["$formattedConfidence", "0xCBDC..."]
-                }
+            requireNotNull(proofResult) { "MoPro returned a null proof result" }
+
+            // Benchmark verification
+            val verificationTimeMs = measureTimeMillis {
+                val isValid = verifyCircomProof(
+                    zkeyPath = zkeyPath,
+                    proofResult = proofResult,
+                    proofLib = ProofLib.ARKWORKS
+                )
+                if (!isValid) throw IllegalStateException("Generated proof failed local verification.")
+            }
+
+            // Serialize and calculate metrics
+            // For the benchmark, we just need the byte size
+            val a = proofResult.proof.a
+            val b = proofResult.proof.b
+            val c = proofResult.proof.c
+            val inputs = proofResult.inputs
+
+            // Format to match the Rust server's exact SnarkJsProof & VerifyRequest structs
+                        val proofJson = """
+            {
+                "proof": {
+                    "pi_a": ["${a.x}", "${a.y}", "${a.z}"],
+                    "pi_b": [
+                        ["${b.x[0]}", "${b.x[1]}"],
+                        ["${b.y[0]}", "${b.y[1]}"],
+                        ["${b.z[0]}", "${b.z[1]}"]
+                    ],
+                    "pi_c": ["${c.x}", "${c.y}", "${c.z}"]
+                },
+                "public_inputs": [${inputs.joinToString(",") { "\"$it\"" }}]
+            }
             """.trimIndent()
 
-            Result.success(
-                ZkProofResult(
-                    proofJson = jsonPayload,
-                    proofSizeInBytes = jsonPayload.toByteArray(Charsets.UTF_8).size,
-                    witnessGenTimeMs = witnessTime,
-                    proofGenTimeMs = provingTime,
-                    totalEngineTimeMs = witnessTime + provingTime
-                )
+            val proofSize = proofJson.toByteArray(Charsets.UTF_8).size
+
+            // TEMP LOG BLOCK
+            Log.d("CBDC_BENCHMARK", """
+                ====================================
+                ZK-SNARK PERFORMANCE METRICS
+                Proof Generation Time: ${generationTimeMs}ms
+                Local Verification Time: ${verificationTimeMs}ms
+                Total Engine Time: ${generationTimeMs + verificationTimeMs}ms
+                Proof Size: $proofSize bytes
+                ====================================
+            """.trimIndent())
+
+            Log.d("CBDC_PAYLOAD", proofJson)
+
+            ZkProofResult(
+                proofJson = proofJson,
+                proofSizeInBytes = proofSize,
+                // UniFFI bundles Witness and Proof generation into a single FFI call
+                // To separate these natively, we would need to modify the MoPro Rust
+                // scaffolding to return a custom struct containing the split timestamps
+                witnessGenTimeMs = 0L,
+                proofGenTimeMs = generationTimeMs,
+                totalEngineTimeMs = generationTimeMs + verificationTimeMs
             )
-        } catch (e: Exception) {
-            Result.failure(e)
         }
     }
 }
