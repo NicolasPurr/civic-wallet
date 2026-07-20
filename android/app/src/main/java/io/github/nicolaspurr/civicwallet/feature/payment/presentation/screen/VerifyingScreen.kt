@@ -18,16 +18,18 @@ import io.github.nicolaspurr.civicwallet.feature.payment.presentation.PaymentUiS
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle // Modern lifecycle-aware collector
 import androidx.lifecycle.flowWithLifecycle
-import io.github.nicolaspurr.civicwallet.feature.payment.domain.usecase.SettlementStep
+import io.github.nicolaspurr.civicwallet.feature.payment.domain.interactor.SettlementStep
 
 @Composable
 fun VerifyingScreen(
     viewModel: PaymentViewModel,
-    onSuccess: () -> Unit,
-    onFail: () -> Unit
+    onSuccess: (amount: String) -> Unit, // Callback accepts parameter
+    onFail: (source: String) -> Unit     // Callback accepts parameter
 ) {
     // Standardized on collectAsStateWithLifecycle to conserve background thread resources
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    // FIXED: Safely collect the decoupled metric
+    val zkGenerationTime by viewModel.zkGenerationTime.collectAsStateWithLifecycle()
     val isError = uiState is PaymentUiState.Error
 
     // Trigger the settlement pipeline automatically when entering the screen
@@ -40,8 +42,8 @@ fun VerifyingScreen(
     LaunchedEffect(viewModel.uiEvent, lifecycleOwner) {
         viewModel.uiEvent.flowWithLifecycle(lifecycleOwner.lifecycle).collect { event ->
             when (event) {
-                is PaymentUiEvent.NavigateToSuccess -> onSuccess()
-                is PaymentUiEvent.NavigateToUnauthorized -> onFail()
+                is PaymentUiEvent.NavigateToSuccess -> onSuccess(event.amount)
+                is PaymentUiEvent.NavigateToUnauthorized -> onFail(event.source)
             }
         }
     }
@@ -92,10 +94,10 @@ fun VerifyingScreen(
             modifier = Modifier.padding(horizontal = 40.dp, vertical = 10.dp)
         )
 
-        if (viewModel.zkGenerationTime > 0 && !isError) {
+        if (zkGenerationTime > 0L && !isError) {
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = "On-Device Proof Generation Time: ${viewModel.zkGenerationTime}ms",
+                text = "On-Device Proof Generation Time: ${zkGenerationTime}ms",
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold

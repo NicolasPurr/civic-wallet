@@ -47,6 +47,7 @@ class ArchitectureTest {
             "io.github.nicolaspurr.civicwallet.feature.", // Peer feature domain imports allowed
             // Core abstract infrastructure interfaces ONLY (No concrete Impl classes allowed)
             "io.github.nicolaspurr.civicwallet.core.zk.ZkProofEngine",
+            "io.github.nicolaspurr.civicwallet.core.zk.SecureBuffer",
             "io.github.nicolaspurr.civicwallet.core.ml.ModelManager",
             "io.github.nicolaspurr.civicwallet.core.hardware.CameraRepository",
             "io.github.nicolaspurr.civicwallet.core.hardware.BiometricAuthenticator"
@@ -66,6 +67,8 @@ class ArchitectureTest {
         val allowedPresentationImports = globalAllowedImports + listOf(
             "android.",       // UI components inherently need platform Android classes
             "androidx.",      // Compose, Lifecycles, Navigation, Activity contracts
+            "dagger.hilt.android.",
+            "dagger.hilt.components.",
             "io.github.nicolaspurr.civicwallet.core.theme.",
             "io.github.nicolaspurr.civicwallet.feature." // UI can import logic from local domain/presentation
             // NOTE: Presentation CANNOT import feature data, mopro, or raw TF Lite
@@ -111,7 +114,7 @@ class ArchitectureTest {
         Konsist.scopeFromProduction()
             .classes()
             .withNameEndingWith("UseCase")
-            .assertTrue { it.resideInPackage("..domain.usecase..") }
+            .assertTrue { it.resideInPackage("..domain.interactor..") }
     }
 
     @Test

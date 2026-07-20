@@ -7,6 +7,7 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import io.github.nicolaspurr.civicwallet.BuildConfig
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import javax.inject.Named
@@ -27,5 +28,13 @@ abstract class WalletModule {
         @Singleton
         @Named("CameraExecutor") // Qualified specifically for camera analysis tasks
         fun provideCameraExecutor(): ExecutorService = Executors.newSingleThreadExecutor()
+
+        // Provides configurable match metrics dynamically to testing targets
+        @Provides
+        @Singleton
+        @Named("TriggerThreshold")
+        fun provideTriggerThreshold(): Float {
+            return BuildConfig.TRIGGER_THRESHOLD
+        }
     }
 }

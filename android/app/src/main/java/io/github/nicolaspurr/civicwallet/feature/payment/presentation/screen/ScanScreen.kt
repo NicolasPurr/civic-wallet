@@ -111,7 +111,8 @@ fun ScanScreen(
                     )
                 }
                 uiState is BiometricUiState.Scanning -> {
-                    BiometricCameraPreview(analyzer = viewModel.faceAnalyzer) // 100% Compile and Konsist safe!
+                    // Parameter-free component setup
+                    BiometricCameraPreview()
                 }
                 uiState is BiometricUiState.GeneratingProof -> {
                     Text("Computing witness...", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), fontSize = 14.sp)

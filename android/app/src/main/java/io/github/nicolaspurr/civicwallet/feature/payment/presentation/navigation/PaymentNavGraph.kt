@@ -3,6 +3,8 @@ package io.github.nicolaspurr.civicwallet.feature.payment.presentation.navigatio
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavController
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -31,8 +33,6 @@ fun PaymentNavGraph(navController: NavHostController) {
                 ScanScreen(
                     viewModel = biometricViewModel,
                     onNavigateToVerifying = {
-                        // Pop the Scan screen so BiometricViewModel instantly clears
-                        // and terminates the background camera/ML processing pipeline.
                         navController.navigate(Screen.Verifying.route) {
                             popUpTo(Screen.Scan.route) { inclusive = true }
                         }
@@ -44,29 +44,33 @@ fun PaymentNavGraph(navController: NavHostController) {
             }
 
             composable(Screen.Verifying.route) { backStackEntry ->
-                val parentEntry = remember(backStackEntry) {
-                    navController.getBackStackEntry(Screen.GRAPH_PAYMENT_FLOW)
-                }
-                val paymentViewModel: PaymentViewModel = hiltViewModel(parentEntry)
+                // Scoping the ViewModel cleanly using the helper below
+                val paymentViewModel: PaymentViewModel = backStackEntry.sharedViewModel(
+                    navController = navController,
+                    parentRoute = Screen.GRAPH_PAYMENT_FLOW
+                )
 
                 VerifyingScreen(
                     viewModel = paymentViewModel,
-                    onSuccess = {
-                        // Pass transaction data down to the route payload dynamically
-                        navController.navigate(Screen.Success.createRoute("$42.00 CBDC")) {
+                    onSuccess = { amount ->
+                        navController.navigate(Screen.Success.createRoute(amount)) {
                             popUpTo(Screen.Verifying.route) { inclusive = true }
                         }
                     },
-                    onFail = {
-                        navController.navigate(Screen.Unauthorized.createRoute("cloud")) {
+                    onFail = { source ->
+                        navController.navigate(Screen.Unauthorized.createRoute(source)) {
                             popUpTo(Screen.Verifying.route) { inclusive = true }
                         }
                     }
                 )
             }
 
-            composable(Screen.Success.route) { backStackEntry ->
-                val amount = backStackEntry.arguments?.getString(Screen.Success.ARG_AMOUNT) ?: "$0.00"
+            composable(
+                route = Screen.Success.route,
+                arguments = Screen.Success.arguments
+            ) { backStackEntry ->
+                // Type-safe, centralized extraction
+                val amount = Screen.Success.getAmount(backStackEntry)
 
                 SuccessScreen(
                     amount = amount,
@@ -78,12 +82,16 @@ fun PaymentNavGraph(navController: NavHostController) {
                 )
             }
 
-            composable(Screen.Unauthorized.route) { backStackEntry ->
-                val parentEntry = remember(backStackEntry) {
-                    navController.getBackStackEntry(Screen.GRAPH_PAYMENT_FLOW)
-                }
-                val overrideViewModel: OverrideViewModel = hiltViewModel(parentEntry)
-                val source = backStackEntry.arguments?.getString(Screen.Unauthorized.ARG_SOURCE) ?: "local"
+            composable(
+                route = Screen.Unauthorized.route,
+                arguments = Screen.Unauthorized.arguments
+            ) { backStackEntry ->
+                val overrideViewModel: OverrideViewModel = backStackEntry.sharedViewModel(
+                    navController = navController,
+                    parentRoute = Screen.GRAPH_PAYMENT_FLOW
+                )
+                // Type-safe, centralized extraction
+                val source = Screen.Unauthorized.getSource(backStackEntry)
 
                 UnauthorizedScreen(
                     source = source,
@@ -94,7 +102,6 @@ fun PaymentNavGraph(navController: NavHostController) {
                         }
                     },
                     onRetrainQueued = {
-                        // If admin override passes, loop back to ScanScreen to re-attempt the flow
                         navController.navigate(Screen.Scan.route) {
                             popUpTo(Screen.GRAPH_PAYMENT_FLOW) { inclusive = false }
                         }
@@ -103,4 +110,19 @@ fun PaymentNavGraph(navController: NavHostController) {
             }
         }
     }
+}
+
+/**
+ * Clean helper extension to scope a Hilt ViewModel to a parent navigation graph safely
+ * without cluttering the declarative compose destination block.
+ */
+@Composable
+inline fun <reified VM : androidx.lifecycle.ViewModel> NavBackStackEntry.sharedViewModel(
+    navController: NavController,
+    parentRoute: String
+): VM {
+    val parentEntry = remember(this) {
+        navController.getBackStackEntry(parentRoute)
+    }
+    return hiltViewModel(parentEntry)
 }

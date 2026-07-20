@@ -2,91 +2,110 @@ package io.github.nicolaspurr.civicwallet.core.zk
 
 import io.github.nicolaspurr.civicwallet.core.di.DefaultDispatcher
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import java.util.Arrays
+import uniffi.mopro.ProofLib
+import uniffi.mopro.generateCircomProof
+import uniffi.mopro.verifyCircomProof
 import javax.inject.Inject
-import javax.inject.Singleton
 import kotlin.system.measureTimeMillis
-import kotlin.time.Duration.Companion.milliseconds
+import android.util.Log
 
-@Singleton
+/**
+ * Native cryptographic bridge for MoPro zero-knowledge proofs.
+ *
+ * Injected via CoreModule. Bound to @DefaultDispatcher to ensure heavy FFI
+ * execution does not block the main thread or UI orchestrators.
+ */
 class ZkProofEngineImpl @Inject constructor(
-    @param:DefaultDispatcher private val dispatcher: CoroutineDispatcher
+    @param:DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher
 ) : ZkProofEngine {
 
-    private val proofHead = "{\"protocol\":\"groth16\"...".toCharArray()
-    private val proofTail = "...\"0xCBDC...\"]}".toCharArray()
+    override suspend fun generateProof(confidence: Float): Result<ZkProofResult> = withContext(defaultDispatcher) {
+        runCatching {
+            // Prepare circuit inputs
+            // MoPro expects a JSON string mapping for Circom inputs.
+            // We scale the float confidence to an integer for the circuit.
+            // THIS WILL NOT BE NEEDEd
+            val scaledConfidence = (confidence * 100).toInt()
+            val circuitInputsJson = """{"confidence": ["$scaledConfidence"]}"""
 
-    override suspend fun generateProof(confidence: Float): Result<ZkProofResult> = withContext(dispatcher) {
-        val confidenceChars = secureFloatToChars(confidence)
-        var secureBuffer: CharArray? = null
+            // Define asset paths
+            // CRITICAL: Rust cannot read directly from Android APK assets via standard I/O.
+            // For this emulator test, use `adb push` to place the .zkey in a readable directory,
+            // or copy it from assets to `context.filesDir` on app launch.
+            val zkeyPath = "/data/local/tmp/cbdc.zkey"
 
-        var witnessTime = 0L
-        var provingTime = 0L
+            var proofResult: uniffi.mopro.CircomProofResult? = null
 
-        try {
-            // Measure Simulated Witness Generation Time
-            witnessTime = measureTimeMillis {
-                delay(800L.milliseconds)
-            }
-
-            // Measure Simulated Proving Time
-            provingTime = measureTimeMillis {
-                delay(1200L.milliseconds)
-            }
-
-            val totalSize = proofHead.size + confidenceChars.size + proofTail.size
-            secureBuffer = CharArray(totalSize)
-
-            var offset = 0
-            proofHead.copyInto(secureBuffer, offset)
-            offset += proofHead.size
-            confidenceChars.copyInto(secureBuffer, offset)
-            offset += confidenceChars.size
-            proofTail.copyInto(secureBuffer, offset)
-
-            Result.success(
-                ZkProofResult(
-                    proof = secureBuffer,
-                    proofSizeInBytes = totalSize * 2, // 1 Char = 2 Bytes in Kotlin JVM
-                    witnessGenTimeMs = witnessTime,
-                    proofGenTimeMs = provingTime,
-                    totalEngineTimeMs = witnessTime + provingTime
+            // Benchmark proof generation (witness + proving)
+            val generationTimeMs = measureTimeMillis {
+                proofResult = generateCircomProof(
+                    zkeyPath = zkeyPath,
+                    circuitInputs = circuitInputsJson,
+                    proofLib = ProofLib.ARKWORKS // Use ARKWORKS for emulator compatibility
                 )
+            }
+
+            requireNotNull(proofResult) { "MoPro returned a null proof result" }
+
+            // Benchmark verification
+            val verificationTimeMs = measureTimeMillis {
+                val isValid = verifyCircomProof(
+                    zkeyPath = zkeyPath,
+                    proofResult = proofResult,
+                    proofLib = ProofLib.ARKWORKS
+                )
+                if (!isValid) throw IllegalStateException("Generated proof failed local verification.")
+            }
+
+            // Serialize and calculate metrics
+            // For the benchmark, we just need the byte size
+            val a = proofResult.proof.a
+            val b = proofResult.proof.b
+            val c = proofResult.proof.c
+            val inputs = proofResult.inputs
+
+            // Format to match the Rust server's exact SnarkJsProof & VerifyRequest structs
+                        val proofJson = """
+            {
+                "proof": {
+                    "pi_a": ["${a.x}", "${a.y}", "${a.z}"],
+                    "pi_b": [
+                        ["${b.x[0]}", "${b.x[1]}"],
+                        ["${b.y[0]}", "${b.y[1]}"],
+                        ["${b.z[0]}", "${b.z[1]}"]
+                    ],
+                    "pi_c": ["${c.x}", "${c.y}", "${c.z}"]
+                },
+                "public_inputs": [${inputs.joinToString(",") { "\"$it\"" }}]
+            }
+            """.trimIndent()
+
+            val proofSize = proofJson.toByteArray(Charsets.UTF_8).size
+
+            // TEMP LOG BLOCK
+            Log.d("CBDC_BENCHMARK", """
+                ====================================
+                ZK-SNARK PERFORMANCE METRICS
+                Proof Generation Time: ${generationTimeMs}ms
+                Local Verification Time: ${verificationTimeMs}ms
+                Total Engine Time: ${generationTimeMs + verificationTimeMs}ms
+                Proof Size: $proofSize bytes
+                ====================================
+            """.trimIndent())
+
+            Log.d("CBDC_PAYLOAD", proofJson)
+
+            ZkProofResult(
+                proofJson = proofJson,
+                proofSizeInBytes = proofSize,
+                // UniFFI bundles Witness and Proof generation into a single FFI call
+                // To separate these natively, we would need to modify the MoPro Rust
+                // scaffolding to return a custom struct containing the split timestamps
+                witnessGenTimeMs = 0L,
+                proofGenTimeMs = generationTimeMs,
+                totalEngineTimeMs = generationTimeMs + verificationTimeMs
             )
-        } catch (e: Exception) {
-            secureBuffer?.let { Arrays.fill(it, '\u0000') }
-            Result.failure(e)
-        } finally {
-            Arrays.fill(confidenceChars, '\u0000')
         }
-    }
-
-    /**
-     * Converts a Float (0.0 to 1.0) into a CharArray WITHOUT allocating a String.
-     * Extracts exactly 4 decimal places natively using primitive math.
-     */
-    private fun secureFloatToChars(value: Float): CharArray {
-        val clamped = value.coerceIn(0f, 1f)
-
-        if (clamped == 1f) return charArrayOf('1', '.', '0', '0', '0', '0')
-        if (clamped == 0f) return charArrayOf('0', '.', '0', '0', '0', '0')
-
-        // Shift decimal 4 places
-        var intVal = (clamped * 10000).toInt()
-
-        val chars = CharArray(6) // Format: "0.xxxx"
-        chars[0] = '0'
-        chars[1] = '.'
-
-        // Extract digits right-to-left using modulo arithmetic
-        // 48 is ASCII for '0'
-        chars[5] = (intVal % 10 + 48).toChar(); intVal /= 10
-        chars[4] = (intVal % 10 + 48).toChar(); intVal /= 10
-        chars[3] = (intVal % 10 + 48).toChar(); intVal /= 10
-        chars[2] = (intVal % 10 + 48).toChar()
-
-        return chars
     }
 }

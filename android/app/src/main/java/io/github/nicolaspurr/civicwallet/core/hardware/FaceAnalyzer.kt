@@ -20,14 +20,22 @@ const val IMG_SIZE = BuildConfig.IMG_SIZE
 
 private const val USE_NATIVE_PREPROCESSING = true
 
+/**
+ * PERFORMANCE DEBT:
+ * This implementation contains heavy CPU processing inside the hot-path analysis loop.
+ * * TODO: [PERF_NATIVE_MIGRATION_REQUIRED]
+ * This entire class will be deprecated. The raw ImageProxy planes will be handed
+ * directly to Rust (libmopro.so) via FFI.
+ */
 @Singleton
 class FaceAnalyzer @Inject constructor(
     private val modelManager: ModelManager,
     private val authSink: BiometricAuthSink
 ) : ImageAnalysis.Analyzer {
 
-    // Pre-allocated properties (wiped and reused in place to prevent JVM GC cycles)
+    @Deprecated("Legacy intermediate JVM scaling state. Eliminate when native preprocessing is active.")
     private val intValues = IntArray(IMG_SIZE * IMG_SIZE)
+
     private val manualInputBuffer: ByteBuffer = ByteBuffer.allocateDirect(1 * IMG_SIZE * IMG_SIZE * 3 * 4).apply {
         order(ByteOrder.nativeOrder())
     }
@@ -36,7 +44,7 @@ class FaceAnalyzer @Inject constructor(
     private val nativeTensorImage = TensorImage(DataType.FLOAT32)
     private val outputBuffer = Array(1) { FloatArray(1) }
 
-    // Pre-allocated itmaps & Canvas matrices to eliminate object creation inside hot loops
+    @Deprecated("Software rendering fallback. Remove once Rust image processing handles raw buffers.")
     private var sourceBitmapBuffer: Bitmap? = null
     private val targetBitmap = createBitmap(IMG_SIZE, IMG_SIZE)
     private val canvas = Canvas(targetBitmap)
@@ -47,6 +55,11 @@ class FaceAnalyzer @Inject constructor(
 
         if (planes.isNotEmpty()) {
             try {
+                // TODO: [RUST_FFI_PORT_TARGET]
+                // Target pattern:
+                // val pointer = planes[0].buffer
+                // NativeBridge.preprocessAndRunInference(pointer, imageProxy.width, imageProxy.height, imageProxy.imageInfo.rotationDegrees)
+
                 val width = imageProxy.width
                 val height = imageProxy.height
 
@@ -67,7 +80,10 @@ class FaceAnalyzer @Inject constructor(
                 val srcH = sourceBitmap.height.toFloat()
                 val rotationDegrees = imageProxy.imageInfo.rotationDegrees
 
-                // Reset and apply transformation matrices inside pre-allocated memory space
+                /**
+                 * CRITICAL PERFORMANCE DEBT: Canvas.drawBitmap & Matrix scaling forces software
+                 * manipulation of high-resolution pixel matrices on the CPU 30 times per second.
+                 */
                 transformationMatrix.reset()
                 transformationMatrix.postTranslate(-srcW / 2f, -srcH / 2f)
                 transformationMatrix.postRotate(rotationDegrees.toFloat())
@@ -92,7 +108,11 @@ class FaceAnalyzer @Inject constructor(
                     nativeTensorImage.load(targetBitmap)
                     finalInputBuffer = nativeTensorImage.buffer
                 } else {
-                    // --- OPTION B: Cleaned JVM loop fallback ---
+                    // --- OPTION B: JVM loop fallback ---
+                    /**
+                     * CRITICAL PERFORMANCE ISSUE:
+                     * Sequentially looping over 50,000 values on the JVM heap stalls the thread pool.
+                     */
                     targetBitmap.getPixels(intValues, 0, targetBitmap.width, 0, 0, targetBitmap.width, targetBitmap.height)
                     manualInputBuffer.rewind()
 

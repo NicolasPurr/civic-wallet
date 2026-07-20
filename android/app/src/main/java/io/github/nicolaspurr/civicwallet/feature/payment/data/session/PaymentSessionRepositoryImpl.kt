@@ -1,44 +1,47 @@
 package io.github.nicolaspurr.civicwallet.feature.payment.data.session
 
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.PaymentSessionRepository
-import java.util.Arrays
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Thread-safe, in-memory implementation of [PaymentSessionRepository].
+ *
+ * This class uses synchronization (`synchronized(this)`) to ensure thread safety.
+ * State is volatile and will not persist across application restarts or process death.
+ */
 @Singleton
 class PaymentSessionRepositoryImpl @Inject constructor() : PaymentSessionRepository {
 
-    // Protected behind synchronization locks to prevent concurrent race exploits
-    private var secureProof: CharArray? = null
+    /**
+     * Holds the active cryptographic proof.
+     */
+    private var cachedProof: String? = null
 
+    @Volatile
     override var generationTimeMs: Long = 0L
         private set
 
-    override fun storeProof(proof: CharArray, timeMs: Long) {
+    override fun storeProof(proof: String, timeMs: Long) {
         synchronized(this) {
-            secureProof = proof
+            cachedProof = proof
             generationTimeMs = timeMs
         }
     }
 
-    override fun extractAndClearProof(): CharArray {
+    override fun consumeProof(): String {
         return synchronized(this) {
-            val proof = secureProof ?: throw IllegalStateException("No proof in memory")
-
-            // Relinquish ownership entirely and clear metadata pointers immediately
-            secureProof = null
+            val proof = cachedProof ?: throw IllegalStateException("No valid ZK proof in session memory.")
+            cachedProof = null
             generationTimeMs = 0L
             proof
         }
     }
 
-    override fun clearSession() {
+    override fun terminateSession() {
         synchronized(this) {
-            // Overwrites raw heap bytes in place before losing the reference
-            secureProof?.let { Arrays.fill(it, '\u0000') }
-            secureProof = null
+            cachedProof = null
             generationTimeMs = 0L
         }
     }
 }
-
