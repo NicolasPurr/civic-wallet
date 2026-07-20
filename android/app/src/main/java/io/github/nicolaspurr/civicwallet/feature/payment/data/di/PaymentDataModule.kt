@@ -46,6 +46,6 @@ abstract class PaymentDataModule {
     @Binds
     @Singleton
     abstract fun bindPaymentSettlementRepository(
-        impl: PaymentSetllementRepository
+        impl: PaymentSettlementRepositoryImpl
     ): PaymentSettlementRepository
 }
