@@ -30,5 +30,5 @@ interface PaymentSettlementRepository {
      * - [Result.success] if the proof was verified and settled.
      * - [Result.failure] if the network was unreachable or the proof failed verification.
      */
-    suspend fun submitZkProof(proof: String): Result<Unit>
+    suspend fun submitZkProof(proof: String): Result<Double>
 }

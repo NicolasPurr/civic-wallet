@@ -34,15 +34,14 @@ sealed interface SettlementStatus {
     /**
      * The transaction has been successfully verified and settled.
      *
-     * @property generationTimeMs The benchmarked time (in ms) it took the local engine to
-     * generate the underlying proof. Provided for UI analytics/benchmarking.
+     * @property generationTimeMs Time (in ms) it took the local device to generate the proof.
+     * @property serverVerificationTimeMs Time (in ms) it took the Rust backend to verify the proof.
      */
-    data class Success(val generationTimeMs: Long) : SettlementStatus
+    data class Success(
+        val generationTimeMs: Long,
+        val serverVerificationTimeMs: Double
+    ) : SettlementStatus
 
-    /**
-     * The settlement failed due to a network, structural, or lifecycle error.
-     * @property message A localized description of the failure.
-     */
     data class Error(val message: String) : SettlementStatus
 }
 
@@ -78,13 +77,19 @@ class PaymentSettlementInteractor @Inject constructor(
             emit(SettlementStatus.Verifying(SettlementStep.INITIALIZING))
 
             emit(SettlementStatus.Verifying(SettlementStep.SUBMITTING_PROOF))
+
+            // Submits proof and expects the server's verification time on success
             val result = settlementRepository.submitZkProof(proof)
 
             emit(SettlementStatus.Verifying(SettlementStep.VERIFYING_CONSTRAINTS))
 
             result.fold(
-                onSuccess = { emit(SettlementStatus.Success(generationTimeMs)) },
-                onFailure = { error -> emit(SettlementStatus.Error(error.message ?: "Cloud settlement rejected.")) }
+                onSuccess = { serverTimeMs ->
+                    emit(SettlementStatus.Success(generationTimeMs, serverTimeMs))
+                },
+                onFailure = { error ->
+                    emit(SettlementStatus.Error(error.message ?: "Cloud settlement rejected."))
+                }
             )
         } finally {
             // Guaranteed session cleanup

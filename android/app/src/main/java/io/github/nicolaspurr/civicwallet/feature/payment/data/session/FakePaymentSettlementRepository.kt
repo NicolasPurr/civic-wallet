@@ -1,4 +1,4 @@
-package io.github.nicolaspurr.civicwallet.feature.payment.data.session
+/*package io.github.nicolaspurr.civicwallet.feature.payment.data.session
 
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.PaymentSettlementRepository
 import kotlinx.coroutines.delay
@@ -21,7 +21,7 @@ class FakePaymentSettlementRepository @Inject constructor() : PaymentSettlementR
      *
      * Introduces a synthetic delay of 1500ms to mimic real-world network round-trip time (RTT).
      */
-    override suspend fun submitZkProof(proof: String): Result<Unit> {
+    override suspend fun submitZkProof(proof: String): Result<Double> {
         delay(1500.milliseconds) // Network delay simulation
 
         val networkSettlementSuccess = true
@@ -32,4 +32,4 @@ class FakePaymentSettlementRepository @Inject constructor() : PaymentSettlementR
             Result.failure(Exception("Cloud settlement server rejected structural ZK constraints."))
         }
     }
-}
+}*/
