@@ -9,6 +9,10 @@ android {
     namespace = "io.github.nicolaspurr.civicwallet"
     compileSdk = 37
 
+    androidResources {
+        noCompress += "zkey"
+    }
+
     defaultConfig {
         applicationId = "io.github.nicolaspurr.civicwallet"
         minSdk = 24
