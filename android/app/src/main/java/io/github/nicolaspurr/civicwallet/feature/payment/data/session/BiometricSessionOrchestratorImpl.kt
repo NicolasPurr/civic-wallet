@@ -4,9 +4,10 @@ import io.github.nicolaspurr.civicwallet.core.di.DefaultDispatcher
 import io.github.nicolaspurr.civicwallet.core.hardware.BiometricAuthenticator
 import io.github.nicolaspurr.civicwallet.core.ml.ModelManager
 import io.github.nicolaspurr.civicwallet.core.ml.ModelState
+import io.github.nicolaspurr.civicwallet.core.zk.ZkProofEngine
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.BiometricSessionOrchestrator
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.SessionState
-import io.github.nicolaspurr.civicwallet.feature.payment.domain.interactor.ZkProofInteractor
+import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.PaymentSessionRepository
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -38,14 +39,15 @@ import javax.inject.Named
  *
  * @param modelManager Handles RAM loading/unloading of the ML interpreter model.
  * @param authenticator Stream adapter bridging system biometric sensors.
- * @param zkProofInteractor The execution pipeline for generating the ZK proof.
+ * @param zkProofEngine The execution pipeline for generating the ZK proof.
  * @param defaultDispatcher Coroutine dispatcher designed to absorb CPU-heavy calculations.
  * @param triggerThreshold The confidence target (0.0-1.0) required for proof generation.
  */
 class BiometricSessionOrchestratorImpl @Inject constructor(
     private val modelManager: ModelManager,
     private val authenticator: BiometricAuthenticator,
-    private val zkProofInteractor: ZkProofInteractor,
+    private val zkProofEngine: ZkProofEngine,
+    private val paymentSessionRepository: PaymentSessionRepository,
     @param:DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher,
     @param:Named("TriggerThreshold") private val triggerThreshold: Float
 ) : BiometricSessionOrchestrator, Closeable {
@@ -130,17 +132,18 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
      * Executes the ZK computation pipeline asynchronously.
      */
     private suspend fun executeProofPipeline(confidence: Float) {
-        // Execute without lock to keep the orchestrator loop unblocked
-        zkProofInteractor.execute(confidence)
-            .onSuccess {
+        zkProofEngine.generateProof(confidence)
+            .onSuccess { proofResult ->
+                paymentSessionRepository.storeResult(proofResult)
                 stateMutex.withLock {
                     _sessionState.value = SessionState.ProofGenerated
                 }
             }
             .onFailure { error ->
                 stateMutex.withLock {
-                    _sessionState.value = SessionState.Error(error.localizedMessage ?:
-                    "Failed proof generation.")
+                    _sessionState.value = SessionState.Error(
+                        error.localizedMessage ?: "Failed proof generation."
+                    )
                 }
             }
     }

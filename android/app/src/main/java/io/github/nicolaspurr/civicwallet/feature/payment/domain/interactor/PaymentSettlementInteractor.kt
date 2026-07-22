@@ -1,5 +1,6 @@
 package io.github.nicolaspurr.civicwallet.feature.payment.domain.interactor
 
+import io.github.nicolaspurr.civicwallet.core.zk.ZkProofResult
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.PaymentSessionRepository
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.PaymentSettlementRepository
 import kotlinx.coroutines.flow.Flow
@@ -62,15 +63,14 @@ class PaymentSettlementInteractor @Inject constructor(
      * @return A cold [Flow] streaming the transactional [SettlementStatus].
      */
     fun execute(): Flow<SettlementStatus> = flow {
-        // Capture the benchmark timing before session termination clears it
-        val generationTimeMs = paymentSessionRepository.generationTimeMs
-
-        // Destructive read of the ZK proof
-        val proof = try {
-            paymentSessionRepository.consumeProof()
+        // Destructively read the complete ZkProofResult from session memory
+        val zkProofResult: ZkProofResult = try {
+            paymentSessionRepository.consumeResult()
         } catch (e: IllegalStateException) {
-            emit(SettlementStatus.Error(
-                "ZK proof session is invalid or has already been consumed. $e")
+            emit(
+                SettlementStatus.Error(
+                    "ZK proof session is invalid or has already been consumed. $e"
+                )
             )
             return@flow
         }
@@ -80,14 +80,20 @@ class PaymentSettlementInteractor @Inject constructor(
 
             emit(SettlementStatus.Verifying(SettlementStep.SUBMITTING_PROOF))
 
-            // Submits proof and expects the server's verification time on success
-            val result = settlementRepository.submitZkProof(proof)
+            // Submit the SnarkJS JSON string extracted from ZkProofResult
+            val result = settlementRepository.submitZkProof(zkProofResult.proofJson)
 
             emit(SettlementStatus.Verifying(SettlementStep.VERIFYING_CONSTRAINTS))
 
             result.fold(
                 onSuccess = { serverTimeMs ->
-                    emit(SettlementStatus.Success(generationTimeMs, serverTimeMs))
+                    // Emit local proof generation time alongside backend server time
+                    emit(
+                        SettlementStatus.Success(
+                            generationTimeMs = zkProofResult.proofGenTimeMs,
+                            serverVerificationTimeMs = serverTimeMs
+                        )
+                    )
                 },
                 onFailure = { error ->
                     emit(SettlementStatus.Error(error.message ?: "Cloud settlement rejected."))

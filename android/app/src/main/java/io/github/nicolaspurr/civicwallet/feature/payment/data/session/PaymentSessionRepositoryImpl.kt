@@ -1,5 +1,6 @@
 package io.github.nicolaspurr.civicwallet.feature.payment.data.session
 
+import io.github.nicolaspurr.civicwallet.core.zk.ZkProofResult
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.PaymentSessionRepository
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -7,41 +8,31 @@ import javax.inject.Singleton
 /**
  * Thread-safe, in-memory implementation of [PaymentSessionRepository].
  *
- * This class uses synchronization (`synchronized(this)`) to ensure thread safety.
+ * This class uses synchronisation (`synchronized(this)`) to ensure thread safety.
  * State is volatile and will not persist across application restarts or process death.
  */
 @Singleton
 class PaymentSessionRepositoryImpl @Inject constructor() : PaymentSessionRepository {
 
-    /**
-     * Holds the active cryptographic proof.
-     */
-    private var cachedProof: String? = null
+    private var cachedResult: ZkProofResult? = null
 
-    @Volatile
-    override var generationTimeMs: Long = 0L
-        private set
-
-    override fun storeProof(proof: String, timeMs: Long) {
+    override fun storeResult(result: ZkProofResult) {
         synchronized(this) {
-            cachedProof = proof
-            generationTimeMs = timeMs
+            cachedResult = result
         }
     }
 
-    override fun consumeProof(): String {
+    override fun consumeResult(): ZkProofResult {
         return synchronized(this) {
-            val proof = cachedProof ?: throw IllegalStateException("No valid ZK proof in session memory.")
-            cachedProof = null
-            generationTimeMs = 0L
-            proof
+            val result = cachedResult ?: throw IllegalStateException("No valid ZK proof in session memory.")
+            cachedResult = null
+            result
         }
     }
 
     override fun terminateSession() {
         synchronized(this) {
-            cachedProof = null
-            generationTimeMs = 0L
+            cachedResult = null
         }
     }
 }

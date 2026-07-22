@@ -30,7 +30,7 @@ class ZkProofInteractor @Inject constructor(
      */
     suspend fun execute(confidence: Float): Result<Unit> {
         return zkEngine.generateProof(confidence).map { result ->
-            paymentSessionRepository.storeProof(result.proofJson, result.totalEngineTimeMs)
+            paymentSessionRepository.storeResult(result)
         }
     }
 }

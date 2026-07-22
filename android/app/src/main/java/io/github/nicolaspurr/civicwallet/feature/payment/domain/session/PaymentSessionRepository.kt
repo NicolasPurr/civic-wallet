@@ -1,4 +1,5 @@
 package io.github.nicolaspurr.civicwallet.feature.payment.domain.session
+import io.github.nicolaspurr.civicwallet.core.zk.ZkProofResult
 
 /**
  * Manages the lifecycle and security-sensitive state of a payment session.
@@ -10,28 +11,21 @@ package io.github.nicolaspurr.civicwallet.feature.payment.domain.session
 interface PaymentSessionRepository {
 
     /**
-     * How much time it took for the proof to be generated.
-     */
-    val generationTimeMs: Long
-
-    /**
-     * Securely stores a cryptographic [proof] associated with a specific timestamp.
+     * Stores the complete ZK proof payload and benchmarking metadata in volatile session memory.
      *
-     * @param proof The cryptographic proof string to be stored.
-     * @param timeMs The epoch timestamp (in milliseconds) indicating when the proof was captured.
-     * @throws IllegalArgumentException if the [proof] is blank or [timeMs] is invalid.
+     * @param result The complete ZK proof result.
      */
-    fun storeProof(proof: String, timeMs: Long)
+    fun storeResult(result: ZkProofResult)
 
     /**
-     * Consumes the cached proof for network settlement.
+     * Consumes the cached proof result for network settlement.
      *
      * To prevent the app from accidentally double-submitting the same transaction,
      * this is a single-use read operation that empties the buffer.
      *
      * @return The proof string extracted from the secure memory container.
      */
-    fun consumeProof(): String
+    fun consumeResult(): ZkProofResult
 
     /**
      * Resets the active session, freeing up cached benchmark metadata and string buffers.

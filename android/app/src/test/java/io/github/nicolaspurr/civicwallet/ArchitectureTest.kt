@@ -47,6 +47,7 @@ class ArchitectureTest {
             "io.github.nicolaspurr.civicwallet.feature.", // Peer feature domain imports allowed
             // Core abstract infrastructure interfaces ONLY (No concrete Impl classes allowed)
             "io.github.nicolaspurr.civicwallet.core.zk.ZkProofEngine",
+            "io.github.nicolaspurr.civicwallet.core.zk.ZkProofResult",
             "io.github.nicolaspurr.civicwallet.core.zk.SecureBuffer",
             "io.github.nicolaspurr.civicwallet.core.ml.ModelManager",
             "io.github.nicolaspurr.civicwallet.core.hardware.CameraRepository",
@@ -83,24 +84,34 @@ class ArchitectureTest {
             }
     }
 
+
+
     @Test
     fun `data layer must ONLY import logic interfaces, core systems, and data dependencies`() {
-        val allowedDataImports = globalAllowedImports + listOf(
-            "android.",
-            "androidx.camera.",     // Android hardware permissions/cameras are allowed here
-            "androidx.biometric.",
-            "io.github.nicolaspurr.civicwallet.core.",
-            "io.github.nicolaspurr.civicwallet.feature.",
-            "org.tensorflow.lite.", // Machine Learning SDKs
-            "mopro."                // Native Rust ZK SDK
-        )
-
-        Konsist.scopeFromProduction()
+        Konsist
+            .scopeFromProject()
             .files
-            .withPackage("io.github.nicolaspurr.civicwallet.feature..data..")
-            .imports
-            .assertTrue { import ->
-                allowedDataImports.any { allowed -> import.name.startsWith(allowed) }
+            .withPackage("..feature..data..")
+            .assertTrue { file ->
+                file.imports.all { import ->
+                    val name = import.name
+                    // Core & Domain layer imports
+                    name.startsWith("io.github.nicolaspurr.civicwallet.core.") ||
+                            (name.startsWith("io.github.nicolaspurr.civicwallet.feature.")
+                                    && name.contains(".domain") || name.contains(".data")) ||
+                            // Data & Networking dependencies
+                            name.startsWith("dagger") ||
+                            name.startsWith("okhttp3") ||
+                            name.startsWith("org.json") ||
+                            name.startsWith("javax.inject") ||
+                            name.startsWith("java.io") ||
+                            name.startsWith("kotlinx.coroutines") ||
+                            name.startsWith("mopro.") ||
+                            name.startsWith("org.tensorflow.lite.") ||
+                            name.startsWith("android.") ||
+                            name.startsWith("androidx.camera.") ||
+                            name.startsWith("androidx.biometric.")
+                }
             }
     }
 
