@@ -8,18 +8,28 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import javax.inject.Qualifier
 
+/** Qualifies coroutine dispatchers optimised for heavy CPU matrix math, ZK proving, and neural
+ * inference. */
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class DefaultDispatcher
 
+/** Qualifies coroutine dispatchers reserved for blocking disk and network I/O operations. */
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class IoDispatcher
 
+/** Qualifies coroutine dispatchers bound to the Android UI main thread. */
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class MainDispatcher
 
+/**
+ * Hilt module providing qualified [CoroutineDispatcher] singletons across the application.
+ *
+ * Using qualifiers instead of referencing `Dispatchers.*` guarantees clean coroutine
+ * thread-switching abstraction and enables dispatcher swapping during unit tests.
+ */
 @Module
 @InstallIn(SingletonComponent::class)
 object DispatchersModule {

@@ -12,7 +12,7 @@ import javax.inject.Inject
  *
  * ### Performance Warning
  * ZK proof generation involves heavy polynomial math. While this function is a `suspend`
- * function, callers should ensure it is collected within a CPU-optimized dispatcher,
+ * function, callers should ensure it is collected within a CPU-optimised dispatcher,
  * such as `Dispatchers.Default`.
  */
 class ZkProofInteractor @Inject constructor(
@@ -25,7 +25,7 @@ class ZkProofInteractor @Inject constructor(
      * On successful generation, the resulting proof payload and engine timing metrics
      * are written directly into the [PaymentSessionRepository].
      *
-     * @param confidence A normalized score (0.0 to 1.0) indicating biometric match quality.
+     * @param confidence A normalised score (0.0 to 1.0) indicating biometric match quality.
      * @return A [Result] indicating whether the proof was successfully generated and stored.
      */
     suspend fun execute(confidence: Float): Result<Unit> {

@@ -11,7 +11,7 @@ import javax.inject.Inject
  * * These steps can be mapped directly to UI progress indicators.
  */
 enum class SettlementStep {
-    /** Preparing the localized transaction details and proof reference. */
+    /** Preparing the localised transaction details and proof reference. */
     INITIALIZING,
 
     /** Transmitting the ZK proof payload to the remote ledger or cloud server. */
@@ -69,7 +69,9 @@ class PaymentSettlementInteractor @Inject constructor(
         val proof = try {
             paymentSessionRepository.consumeProof()
         } catch (e: IllegalStateException) {
-            emit(SettlementStatus.Error("ZK proof session is invalid or has already been consumed. $e"))
+            emit(SettlementStatus.Error(
+                "ZK proof session is invalid or has already been consumed. $e")
+            )
             return@flow
         }
 
@@ -92,7 +94,7 @@ class PaymentSettlementInteractor @Inject constructor(
                 }
             )
         } finally {
-            // Guaranteed session cleanup
+            // Guaranteed session clean-up
             paymentSessionRepository.terminateSession()
         }
     }

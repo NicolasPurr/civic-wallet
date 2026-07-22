@@ -27,7 +27,7 @@ import javax.inject.Named
  *
  * ### Concurrency Architecture
  * Since biometric data updates frequently from a sensor background thread and ML states can mutate
- * asynchronously, this class uses [Mutex] serialization ([stateMutex]) to guard its internal
+ * asynchronously, this class uses [Mutex] serialisation ([stateMutex]) to guard its internal
  * variables.
  *
  * All asynchronous workloads are executed within a custom [orchestratorScope] isolated to the
@@ -36,11 +36,11 @@ import javax.inject.Named
  * This class implements [Closeable] to prevent resource leaks when the orchestrator is cleared by
  * the dependency injection container or lifecycle owner.
  *
- * @param modelManager Handles physical RAM loading/unloading of the ML interpreter model.
+ * @param modelManager Handles RAM loading/unloading of the ML interpreter model.
  * @param authenticator Stream adapter bridging system biometric sensors.
  * @param zkProofInteractor The execution pipeline for generating the ZK proof.
  * @param defaultDispatcher Coroutine dispatcher designed to absorb CPU-heavy calculations.
- * @param triggerThreshold The confidence target (0.0 - 1.0) required for proof generation.
+ * @param triggerThreshold The confidence target (0.0-1.0) required for proof generation.
  */
 class BiometricSessionOrchestratorImpl @Inject constructor(
     private val modelManager: ModelManager,
@@ -56,7 +56,7 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
     /** Root coroutine scope bound to the life of the orchestrator instance. */
     private val orchestratorScope = CoroutineScope(SupervisorJob() + defaultDispatcher)
 
-    /** References the single active running session job; canceled on [stop] or [reset]. */
+    /** References the single active running session job; cancelled on [stop] or [reset]. */
     private var activeJob: Job? = null
 
     /** Locks state updates to prevent race conditions from rapid biometric data streams. */
@@ -71,8 +71,8 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
         activeJob = orchestratorScope.launch {
             _sessionState.value = SessionState.Initializing
 
-            // Acquire the state mutex during initialization to prevent execution race
-            // conditions with asynchronous model releases called via stop().
+            // Acquire the state mutex during initialisation to prevent race conditions with
+            // asynchronous model releases called via stop().
             stateMutex.withLock {
                 modelManager.initialize()
             }
@@ -92,7 +92,9 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
                             }
                             is ModelState.Error -> {
                                 isModelReady = false // Hardened state safety
-                                _sessionState.value = SessionState.Error("Model Init Failed: ${state.message}")
+                                _sessionState.value = SessionState.Error("Model Init Failed: " +
+                                        state.message
+                                )
                             }
                         }
                     }
@@ -110,7 +112,7 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
                             if (clampedScore >= triggerThreshold) {
                                 _sessionState.value = SessionState.GeneratingProof
                                 // Launching within Sub-job B's child scope guarantees that
-                                // canceling activeJob will cascade and cancel the proof pipeline.
+                                // cancelling [activeJob] will cancel the proof pipeline.
                                 launch {
                                     executeProofPipeline(clampedScore)
                                 }
@@ -137,7 +139,8 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
             }
             .onFailure { error ->
                 stateMutex.withLock {
-                    _sessionState.value = SessionState.Error(error.localizedMessage ?: "Failed proof generation.")
+                    _sessionState.value = SessionState.Error(error.localizedMessage ?:
+                    "Failed proof generation.")
                 }
             }
     }

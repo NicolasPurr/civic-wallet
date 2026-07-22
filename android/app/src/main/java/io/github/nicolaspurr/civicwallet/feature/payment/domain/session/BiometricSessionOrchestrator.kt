@@ -21,14 +21,14 @@ import java.io.Closeable
  * | Any State | `stop()` / `reset()` | [Idle] / [Ready] |
  */
 sealed interface SessionState {
-    /** The session has not been initialized yet, or has been explicitly stopped. */
+    /** The session has not been initialised yet, or has been explicitly stopped. */
     data object Idle : SessionState
 
-    /** The underlying machine learning models are being hot-loaded into memory. */
+    /** The ML models are being hot-loaded into memory. */
     data object Initializing : SessionState
 
     /** * The session is active and listening to live biometric data.
-     * @param confidence A normalized score representing biometric alignment, ranging from `0.0` to `1.0`.
+     * @param confidence A normalised score representing biometric alignment, between `0.0-1.0`.
      */
     data class Ready(val confidence: Float) : SessionState
 
@@ -40,7 +40,7 @@ sealed interface SessionState {
 
     /**
      * A non-recoverable failure occurred during model setup or proof calculation.
-     * @param message A localized human-readable reason for the failure.
+     * @param message A localised human-readable reason for the failure.
      */
     data class Error(val message: String) : SessionState
 }
@@ -60,7 +60,7 @@ interface BiometricSessionOrchestrator : Closeable {
 
     /**
      * Starts the biometric session. This loads the local ML model into RAM and begins
-     * listening to hardware biometric streams.
+     * listening to biometric streams.
      *
      * Calling this while a session is already running has no effect.
      */
@@ -71,13 +71,13 @@ interface BiometricSessionOrchestrator : Closeable {
      * the underlying ML model.
      *
      * If the ML model is still cached in memory, this reverts state to [SessionState.Ready] (0.0).
-     * If initialization failed or was stopped, it resets back to [SessionState.Idle].
+     * If initialisation failed or was stopped, it resets back to [SessionState.Idle].
      */
     fun reset()
 
     /**
-     * Tears down the active session. This cancels any running proof generation,
-     * stops hardware biometric listeners, and safely unloads the ML model from RAM.
+     * Stops the active session. This cancels any running proof generation,
+     * stops biometric listeners, and safely unloads the ML model from RAM.
      */
     fun stop()
 }

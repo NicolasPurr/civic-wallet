@@ -34,20 +34,29 @@ private val LightColorScheme = lightColorScheme(
     onSurface = Color(0xFF191C19)
 )
 
+/**
+ * Root Material3 theme wrapper for Civic Wallet.
+ *
+ * Configures application-wide colour schemes, typography styles, and automatically synchronises
+ * Android system bar icon contrast (`isAppearanceLightStatusBars`) with the active theme mode.
+ *
+ * @param darkTheme Controls whether [DarkColorScheme] or [LightColorScheme] is applied.
+ * Defaults to `true`.
+ * @param content Composable slot hierarchy wrapped by this theme layout.
+ */
 @Composable
 fun SmartWalletTheme(
-    darkTheme: Boolean = true, // Defaulting to true guarantees styling out of the box
+    darkTheme: Boolean = true, // Defaulting to true guarantees dark cyber styling out of the box
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
     val view = LocalView.current
 
-    // Synchronize Android system bars with our theme colors and contrast rules
+    // Synchronise Android system bars with theme colours and contrast rules
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as? Activity)?.window
             if (window != null) {
-                // Set system icons to contrast properly with our backgrounds
                 val windowInsetsController = WindowCompat.getInsetsController(window, view)
                 windowInsetsController.isAppearanceLightStatusBars = !darkTheme
                 windowInsetsController.isAppearanceLightNavigationBars = !darkTheme

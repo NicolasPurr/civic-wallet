@@ -7,8 +7,7 @@ import kotlinx.coroutines.flow.Flow
  */
 interface BiometricAuthenticator {
     /**
-     * Emits sanitized live inference confidence scores.
-     *
+     * Emits sanitised live inference confidence scores.
      */
     val confidenceFlow: Flow<Float>
 }
@@ -17,5 +16,11 @@ interface BiometricAuthenticator {
  * Write-only interface for data-layer hardware drivers (e.g., Camera Analyzers).
  */
 interface BiometricAuthSink {
+
+    /**
+     * Emits a newly calculated confidence score into the reactive pipeline.
+     *
+     * @param score Normalized confidence score between 0.0 (no match) and 1.0 (positive match).
+     */
     fun emitConfidence(score: Float)
 }

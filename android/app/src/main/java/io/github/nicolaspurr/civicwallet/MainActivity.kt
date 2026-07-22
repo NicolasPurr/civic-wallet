@@ -13,11 +13,20 @@ import io.github.nicolaspurr.civicwallet.core.theme.SmartWalletTheme
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.navigation.PaymentNavGraph
 import dagger.hilt.android.AndroidEntryPoint
 
+/**
+ * Primary Activity and entry point for the Civic Wallet application.
+ *
+ * Annotated with [@AndroidEntryPoint] to enable field injection for Activity-scoped components.
+ * Configures edge-to-edge window rendering and initialises the Jetpack Compose UI surface
+ * and navigation host.
+ */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge() // Installs physical window-insetting rules
+        // Enforces edge-to-edge system window bar insets across modern Android versions
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+
         setContent {
             SmartWalletTheme {
                 Surface(
