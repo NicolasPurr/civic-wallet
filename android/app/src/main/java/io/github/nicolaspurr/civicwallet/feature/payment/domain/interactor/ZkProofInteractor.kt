@@ -3,6 +3,9 @@ package io.github.nicolaspurr.civicwallet.feature.payment.domain.interactor
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.PaymentSessionRepository
 import io.github.nicolaspurr.civicwallet.core.zk.ZkProofEngine
 import javax.inject.Inject
+import javax.inject.Singleton
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Executes the ZK proof generation and stores the result.
@@ -15,10 +18,15 @@ import javax.inject.Inject
  * function, callers should ensure it is collected within a CPU-optimised dispatcher,
  * such as `Dispatchers.Default`.
  */
+@Singleton
 class ZkProofInteractor @Inject constructor(
     private val zkEngine: ZkProofEngine,
     private val paymentSessionRepository: PaymentSessionRepository
 ) {
+    private val executionMutex = Mutex()
+    @Volatile private var isGenerating = false
+
+
     /**
      * Triggers the cryptographic proof generation engine using the provided biometric [confidence].
      *
@@ -29,8 +37,24 @@ class ZkProofInteractor @Inject constructor(
      * @return A [Result] indicating whether the proof was successfully generated and stored.
      */
     suspend fun execute(confidence: Float): Result<Unit> {
-        return zkEngine.generateProof(confidence).map { result ->
-            paymentSessionRepository.storeResult(result)
+        if (isGenerating) {
+            return Result.failure(IllegalStateException("Proof generation already in progress."))
+        }
+
+        return executionMutex.withLock {
+            if (isGenerating) {
+                return Result.failure(IllegalStateException("Proof generation already in progress."))
+            }
+            isGenerating = true
+            try {
+                val result = zkEngine.generateProof(confidence)
+                result.onSuccess { proof ->
+                    paymentSessionRepository.storeResult(proof)
+                }
+                result.map { }
+            } finally {
+                isGenerating = false
+            }
         }
     }
 }

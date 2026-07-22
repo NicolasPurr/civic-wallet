@@ -90,10 +90,13 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
                             }
                             is ModelState.Ready -> {
                                 isModelReady = true
-                                _sessionState.value = SessionState.Ready(0f)
+                                // Prevents from resetting GeneratingProof back to Ready.
+                                if (_sessionState.value is SessionState.Initializing) {
+                                    _sessionState.value = SessionState.Ready(0f)
+                                }
                             }
                             is ModelState.Error -> {
-                                isModelReady = false // Hardened state safety
+                                isModelReady = false
                                 _sessionState.value = SessionState.Error("Model Init Failed: " +
                                         state.message
                                 )
@@ -106,6 +109,10 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
             // Sub-job B: Monitor live biometric confidence signals
             launch {
                 authenticator.confidenceFlow.collect { rawScore ->
+                    // Declare flags INSIDE the collect lambda so they reset on every frame
+                    var shouldExecuteProof = false
+                    var targetConfidence = 0f
+
                     stateMutex.withLock {
                         val currentState = _sessionState.value
                         if (currentState is SessionState.Ready) {
@@ -113,15 +120,16 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
 
                             if (clampedScore >= triggerThreshold) {
                                 _sessionState.value = SessionState.GeneratingProof
-                                // Launching within Sub-job B's child scope guarantees that
-                                // cancelling [activeJob] will cancel the proof pipeline.
-                                launch {
-                                    executeProofPipeline(clampedScore)
-                                }
+                                shouldExecuteProof = true
+                                targetConfidence = clampedScore
                             } else {
                                 _sessionState.value = SessionState.Ready(clampedScore)
                             }
                         }
+                    }
+
+                    if (shouldExecuteProof) {
+                        executeProofPipeline(targetConfidence)
                     }
                 }
             }

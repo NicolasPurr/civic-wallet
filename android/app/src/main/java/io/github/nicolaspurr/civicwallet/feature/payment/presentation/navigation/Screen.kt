@@ -7,7 +7,7 @@ import androidx.navigation.navArgument
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
-// File-level constants are initialized before the classes load
+// File-level constants are initialised before the classes load
 private const val ARG_AMOUNT = "amount"
 private const val ARG_SOURCE = "source"
 
@@ -15,6 +15,8 @@ sealed class Screen(
     val route: String,
     val arguments: List<NamedNavArgument> = emptyList()
 ) {
+    data object Main : Screen("main")
+
     data object Scan : Screen("scan")
 
     data object Verifying : Screen("verifying")

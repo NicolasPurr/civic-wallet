@@ -4,10 +4,23 @@ import android.widget.Toast
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -18,9 +31,22 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import io.github.nicolaspurr.civicwallet.feature.payment.presentation.OverrideViewModel
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.OverrideUiState
+import io.github.nicolaspurr.civicwallet.feature.payment.presentation.OverrideViewModel
 
+/**
+ * Screen presented when an authorisation error or rejection occurs
+ * (e.g., cloud settlement rejection or local verification failure).
+ *
+ * Allows the account owner to perform an admin override using Android's native system biometric
+ * or device credential screen lock.
+ *
+ * @param source String indicating the failure origin (e.g., `"cloud"` for settlement rejection).
+ * @param viewModel ViewModel managing admin override state and authentication callbacks.
+ * @param onCancel Callback triggered when the user cancels the override process.
+ * @param onRetrainQueued Callback invoked when the admin override succeeds and
+ * local weight retraining is queued.
+ */
 @Composable
 fun UnauthorizedScreen(
     source: String,
@@ -63,7 +89,7 @@ fun UnauthorizedScreen(
             fontWeight = FontWeight.Bold
         )
         Text(
-            text = "Biometric profile did not match local weights.",
+            text = "No detailed information available.",
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = 10.dp, bottom = 40.dp)
@@ -116,7 +142,9 @@ fun UnauthorizedScreen(
                     Spacer(modifier = Modifier.height(15.dp))
                     Text(
                         text = statusMessage,
-                        color = if (overrideState is OverrideUiState.Error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        color = if (overrideState is OverrideUiState.Error)
+                            MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         fontSize = 14.sp,
                         textAlign = TextAlign.Center
                     )
@@ -127,8 +155,14 @@ fun UnauthorizedScreen(
 }
 
 /**
- * Triggers the system-managed BiometricPrompt window.
- * This launches Android's native secure TEE/SE boundaries.
+ * Displays the system-managed [BiometricPrompt] dialog leveraging Android's TEE/SE security
+ * boundaries.
+ *
+ * Configured to allow both strong biometrics and primary device credentials (PIN/Pattern/Password).
+ *
+ * @param activity The host [FragmentActivity] required by [BiometricPrompt].
+ * @param onSuccess Callback triggered upon successful user authentication.
+ * @param onFail Callback triggered when authentication encounters an error or gets rejected.
  */
 private fun showSystemBiometricPrompt(
     activity: FragmentActivity,
@@ -162,7 +196,8 @@ private fun showSystemBiometricPrompt(
         .setTitle("Admin Override Authentication")
         .setSubtitle("Confirm your identity to modify security weights.")
         // Allows user's Lock Screen PIN, pattern, or password as backup to Biometrics
-        .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+        .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                BiometricManager.Authenticators.DEVICE_CREDENTIAL)
         .build()
 
     try {
@@ -171,42 +206,3 @@ private fun showSystemBiometricPrompt(
         onFail(e.localizedMessage ?: "Hardware interface failed to load.")
     }
 }
-
-/* DEPRECATED
-@Composable
-private fun CustomPseudoSecureNumpad(
-    onDigitClick: (Char) -> Unit,
-    onBackspaceClick: () -> Unit,
-    enabled: Boolean
-) {
-    val buttonColors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
-
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        val pad = listOf(
-            listOf('1', '2', '3'),
-            listOf('4', '5', '6'),
-            listOf('7', '8', '9')
-        )
-
-        pad.forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                row.forEach { digit ->
-                    TextButton(onClick = { onDigitClick(digit) }, enabled = enabled, colors = buttonColors, modifier = Modifier.size(60.dp)) {
-                        Text(digit.toString(), fontSize = 24.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-            Spacer(modifier = Modifier.size(60.dp))
-            TextButton(onClick = { onDigitClick('0') }, enabled = enabled, colors = buttonColors, modifier = Modifier.size(60.dp)) {
-                Text("0", fontSize = 24.sp, fontWeight = FontWeight.Medium)
-            }
-            TextButton(onClick = onBackspaceClick, enabled = enabled, colors = buttonColors, modifier = Modifier.size(60.dp)) {
-                Text("⌫", fontSize = 24.sp)
-            }
-        }
-    }
-}
- */

@@ -1,38 +1,56 @@
 package io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import io.github.nicolaspurr.civicwallet.feature.payment.presentation.PaymentUiEvent
-import io.github.nicolaspurr.civicwallet.feature.payment.presentation.PaymentViewModel
-import io.github.nicolaspurr.civicwallet.feature.payment.presentation.PaymentUiState
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.compose.collectAsStateWithLifecycle // Modern lifecycle-aware collector
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.flowWithLifecycle
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.interactor.SettlementStep
+import io.github.nicolaspurr.civicwallet.feature.payment.presentation.PaymentUiEvent
+import io.github.nicolaspurr.civicwallet.feature.payment.presentation.PaymentUiState
+import io.github.nicolaspurr.civicwallet.feature.payment.presentation.PaymentViewModel
 
+/**
+ * Composable screen responsible for displaying the real-time progress of cryptographic
+ * proof verification and settlement.
+ *
+ * Observes state and performance metrics from [PaymentViewModel] and listens to one-time
+ * [PaymentUiEvent] emissions to navigate to either the success screen or the unauthorised screen.
+ *
+ * @param viewModel The [PaymentViewModel] managing settlement state and cryptographic event streams.
+ * @param onSuccess Callback triggered when verification completes, passing the authorised payment
+ * amount string.
+ * @param onFail Callback triggered when verification fails, passing the failure source identifier.
+ */
 @Composable
 fun VerifyingScreen(
     viewModel: PaymentViewModel,
     onSuccess: (amount: String) -> Unit, // Callback accepts parameter
     onFail: (source: String) -> Unit     // Callback accepts parameter
 ) {
-    // Standardized on collectAsStateWithLifecycle to conserve background thread resources
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    // FIXED: Safely collect the decoupled metric
     val zkGenerationTime by viewModel.zkGenerationTime.collectAsStateWithLifecycle()
     val isError = uiState is PaymentUiState.Error
 
-    // Trigger the settlement pipeline automatically when entering the screen
+    // Keyed to viewModel to trigger settlement once when entering composition
     LaunchedEffect(viewModel) {
         viewModel.startSettlement()
     }
@@ -48,7 +66,7 @@ fun VerifyingScreen(
         }
     }
 
-    // Purely computational UI state mapping
+    // Computational UI state mapping
     val statusText = when (val state = uiState) {
         is PaymentUiState.Verifying -> when (state.step) {
             SettlementStep.INITIALIZING -> "Initializing cryptographic validation..."

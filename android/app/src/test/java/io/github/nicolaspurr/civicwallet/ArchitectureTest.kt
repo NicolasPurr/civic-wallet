@@ -84,8 +84,6 @@ class ArchitectureTest {
             }
     }
 
-
-
     @Test
     fun `data layer must ONLY import logic interfaces, core systems, and data dependencies`() {
         Konsist

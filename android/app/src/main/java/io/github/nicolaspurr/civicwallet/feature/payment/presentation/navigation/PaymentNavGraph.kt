@@ -10,8 +10,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.navigation
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.BiometricViewModel
+import io.github.nicolaspurr.civicwallet.feature.payment.presentation.MainViewModel
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.PaymentViewModel
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.OverrideViewModel
+import io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen.MainPaymentScreen
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen.ScanScreen
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen.SuccessScreen
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen.UnauthorizedScreen
@@ -24,9 +26,23 @@ fun PaymentNavGraph(navController: NavHostController) {
         startDestination = Screen.GRAPH_PAYMENT_FLOW
     ) {
         navigation(
-            startDestination = Screen.Scan.route,
+            startDestination = Screen.Main.route,
             route = Screen.GRAPH_PAYMENT_FLOW
         ) {
+            composable(Screen.Main.route) {
+                val mainViewModel: MainViewModel = hiltViewModel()
+
+                MainPaymentScreen(
+                    viewModel = mainViewModel,
+                    onNavigateToScan = {
+                        navController.navigate(Screen.Scan.route)
+                    },
+                    onNavigateToVerifying = {
+                        navController.navigate(Screen.Verifying.route)
+                    }
+                )
+            }
+
             composable(Screen.Scan.route) {
                 val biometricViewModel: BiometricViewModel = hiltViewModel()
 
@@ -44,7 +60,7 @@ fun PaymentNavGraph(navController: NavHostController) {
             }
 
             composable(Screen.Verifying.route) { backStackEntry ->
-                // Scoping the ViewModel cleanly using the helper below
+                // Scoping the ViewModel using the helper below
                 val paymentViewModel: PaymentViewModel = backStackEntry.sharedViewModel(
                     navController = navController,
                     parentRoute = Screen.GRAPH_PAYMENT_FLOW
@@ -69,7 +85,7 @@ fun PaymentNavGraph(navController: NavHostController) {
                 route = Screen.Success.route,
                 arguments = Screen.Success.arguments
             ) { backStackEntry ->
-                // Type-safe, centralized extraction
+                // Type-safe, centralised extraction
                 val amount = Screen.Success.getAmount(backStackEntry)
 
                 SuccessScreen(
@@ -90,7 +106,7 @@ fun PaymentNavGraph(navController: NavHostController) {
                     navController = navController,
                     parentRoute = Screen.GRAPH_PAYMENT_FLOW
                 )
-                // Type-safe, centralized extraction
+                // Type-safe, centralised extraction
                 val source = Screen.Unauthorized.getSource(backStackEntry)
 
                 UnauthorizedScreen(
