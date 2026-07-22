@@ -63,27 +63,27 @@ Upon successful execution, the required `.zkey`, JNI `.so` binaries, and `mopro.
 Civic Wallet integrates Circom circuits, Rust-based mobile bindings via [MoPro](https://github.com/zkmopro/mopro), an Axum verification server, and a native Android application.
 
 ```
-       ┌────────────────────────┐
-       │   circuit-generation   │
-       │    (Circom + SnarkJS)  │
-       └───────────┬────────────┘
-                   │
-    ┌──────────────┴──────────────┐
-    ▼                             ▼
-.zkey + .wasm            verification_key.json
-    │                             │
-    ▼                             ▼
-┌──────────────┐         ┌────────────────────────┐
-│    MoPro     │         │ zk-verification-server │
-│ (Rust / JNI) │         │        (Axum)          │
-└──────┬───────┘         └────────────────────────┘
-       │
+                 ┌────────────────────────┐
+                 │   circuit-generation   │
+                 │    (Circom + SnarkJS)  │
+                 └───────────┬────────────┘
+                             │
+              ┌──────────────┴──────────────┐
+              ▼                             ▼
+        .zkey + .wasm             verification_key.json
+              │                             │
+              ▼                             ▼
+       ┌──────────────┐         ┌────────────────────────┐
+       │    MoPro     │         │ zk-verification-server │
+       │ (Rust / JNI) │         │        (Axum)          │
+       └──────┬───────┘         └────────────────────────┘
+              │
  Kotlin Bindings (.kt) + .so Libraries
-       │
-       ▼
-┌──────────────┐
-│   android    │ (Civic Wallet App)
-└──────────────┘
+              │
+              ▼
+       ┌──────────────┐
+       │   android    │ (Civic Wallet App)
+       └──────────────┘
 ```
 
 ### Circuit Compilation&Deployment Pipeline
@@ -92,5 +92,3 @@ Civic Wallet integrates Circom circuits, Rust-based mobile bindings via [MoPro](
 2. **Artifact Distribution**: Delivers `verification_key.json` to the Axum server and `.zkey`/WASM files to the MoPro target directory.
 3. **MoPro Library Generation**: Compiles native C/C++ shared libraries (`.so`) and UniFFI Kotlin bindings (`mopro.kt`) for mobile targets.
 4. **Android Deployment**: Copies generated Kotlin bindings to `app/src/main/java/uniffi/mopro`, `.so` libraries to `jniLibs/`, and the proving key into Android `assets/`.
-
-

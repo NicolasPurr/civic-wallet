@@ -46,8 +46,7 @@ class MainViewModel @Inject constructor(
 
 
     /**
-     * A read-only [SharedFlow] of [MainUiEvent] observed by the UI to trigger single-shot actions
-     * (e.g., navigation).
+     * A read-only [SharedFlow] of [MainUiEvent] observed by the UI to trigger actions.
      */
     private val _uiEvent = MutableSharedFlow<MainUiEvent>()
     /**
@@ -69,6 +68,12 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Bypasses facial biometric matching to trigger immediate ZK proof generation.
+     *
+     * Supplies a fixed 100% confidence value (`1.0f`) to simulate a perfect match,
+     * enabling smooth benchmarking on emulators and non-TEE devices.
+     */
     fun onInitiateBypassBiometrics() {
         viewModelScope.launch {
             // Generate ZK proof directly with 100% confidence (1.0f) for the bypass benchmark

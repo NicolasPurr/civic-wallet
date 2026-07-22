@@ -19,16 +19,26 @@ import io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen.Suc
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen.UnauthorizedScreen
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen.VerifyingScreen
 
+/**
+ * Constructs the Jetpack Compose navigation host for the payment feature graph.
+ *
+ * Configures route composables, handles backstack popping strategies for terminal states,
+ * and manages shared ViewModel scoping across nested destinations.
+ *
+ * @param navController Root navigation controller instance.
+ */
 @Composable
 fun PaymentNavGraph(navController: NavHostController) {
     NavHost(
         navController = navController,
         startDestination = Screen.GRAPH_PAYMENT_FLOW
     ) {
+        // Enclose payment flow destinations within a distinct nested sub-graph
         navigation(
             startDestination = Screen.Main.route,
             route = Screen.GRAPH_PAYMENT_FLOW
         ) {
+            // Main Overview Destination
             composable(Screen.Main.route) {
                 val mainViewModel: MainViewModel = hiltViewModel()
 
@@ -43,12 +53,15 @@ fun PaymentNavGraph(navController: NavHostController) {
                 )
             }
 
+            // Camera Biometric Scan Destination
             composable(Screen.Scan.route) {
                 val biometricViewModel: BiometricViewModel = hiltViewModel()
 
                 ScanScreen(
                     viewModel = biometricViewModel,
                     onNavigateToVerifying = {
+                        // Pop Scan destination to prevent user returning to camera feed via
+                        // hardware back press
                         navController.navigate(Screen.Verifying.route) {
                             popUpTo(Screen.Scan.route) { inclusive = true }
                         }
@@ -59,8 +72,9 @@ fun PaymentNavGraph(navController: NavHostController) {
                 )
             }
 
+            // Cryptographic Proof Generation & Verification Destination
             composable(Screen.Verifying.route) { backStackEntry ->
-                // Scoping the ViewModel using the helper below
+                // Obtain PaymentViewModel scoped to the parent graph to keep state across screens
                 val paymentViewModel: PaymentViewModel = backStackEntry.sharedViewModel(
                     navController = navController,
                     parentRoute = Screen.GRAPH_PAYMENT_FLOW
@@ -69,6 +83,7 @@ fun PaymentNavGraph(navController: NavHostController) {
                 VerifyingScreen(
                     viewModel = paymentViewModel,
                     onSuccess = { amount ->
+                        // Pop Verifying to ensure generation cannot be re-triggered by back press
                         navController.navigate(Screen.Success.createRoute(amount)) {
                             popUpTo(Screen.Verifying.route) { inclusive = true }
                         }
@@ -81,16 +96,18 @@ fun PaymentNavGraph(navController: NavHostController) {
                 )
             }
 
+            // Transaction Success Summary Destination
             composable(
                 route = Screen.Success.route,
                 arguments = Screen.Success.arguments
             ) { backStackEntry ->
-                // Type-safe, centralised extraction
+                // Type-safe argument extraction from backstack entry
                 val amount = Screen.Success.getAmount(backStackEntry)
 
                 SuccessScreen(
                     amount = amount,
                     onDone = {
+                        // Clear the entire payment sub-graph from backstack upon completion
                         navController.navigate(Screen.GRAPH_PAYMENT_FLOW) {
                             popUpTo(Screen.GRAPH_PAYMENT_FLOW) { inclusive = true }
                         }
@@ -98,6 +115,7 @@ fun PaymentNavGraph(navController: NavHostController) {
                 )
             }
 
+            // Authorization / Proof Failure Destination
             composable(
                 route = Screen.Unauthorized.route,
                 arguments = Screen.Unauthorized.arguments
@@ -106,18 +124,20 @@ fun PaymentNavGraph(navController: NavHostController) {
                     navController = navController,
                     parentRoute = Screen.GRAPH_PAYMENT_FLOW
                 )
-                // Type-safe, centralised extraction
+                // Type-safe extraction of failure source
                 val source = Screen.Unauthorized.getSource(backStackEntry)
 
                 UnauthorizedScreen(
                     source = source,
                     viewModel = overrideViewModel,
                     onCancel = {
+                        // Clear graph backstack on cancellation
                         navController.navigate(Screen.GRAPH_PAYMENT_FLOW) {
                             popUpTo(Screen.GRAPH_PAYMENT_FLOW) { inclusive = true }
                         }
                     },
                     onRetrainQueued = {
+                        // Return to scan screen while keeping parent navigation graph active
                         navController.navigate(Screen.Scan.route) {
                             popUpTo(Screen.GRAPH_PAYMENT_FLOW) { inclusive = false }
                         }
@@ -129,8 +149,15 @@ fun PaymentNavGraph(navController: NavHostController) {
 }
 
 /**
- * Clean helper extension to scope a Hilt ViewModel to a parent navigation graph safely
- * without cluttering the declarative compose destination block.
+ * Extension function on [NavBackStackEntry] to scope a Hilt-injected [androidx.lifecycle.ViewModel]
+ * to a parent nested navigation graph rather than the individual destination.
+ *
+ * Retains state continuity across multiscreen flows without manual lifecycle management.
+ *
+ * @param VM The target ViewModel type.
+ * @param navController The active root navigation controller.
+ * @param parentRoute The route key of the parent nested graph.
+ * @return A Hilt ViewModel instance scoped to the parent graph's lifecycle.
  */
 @Composable
 inline fun <reified VM : androidx.lifecycle.ViewModel> NavBackStackEntry.sharedViewModel(

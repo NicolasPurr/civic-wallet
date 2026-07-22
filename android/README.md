@@ -94,6 +94,7 @@ app/src/main/java/io/github/nicolaspurr/civicwallet/
             │       Screen.kt                    # Type-safe navigation routes
             │
             └───screen
+                    MainPaymentScreen.kt         # Payment options, biometrics bypass
                     ScanScreen.kt                # Biometric scan UI
                     SuccessScreen.kt             # Post-authorization summary layout
                     UnauthorizedScreen.kt        # Verification fail/override terminal
