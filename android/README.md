@@ -2,11 +2,11 @@
 
 This directory contains the Android client application for Civic Wallet. In this initial stage of development, the application functions as a benchmarking tool for empirical performance analysis of zk-SNARK protocols for Central Bank Digital Currency (CBDC) payment schemes.
 
-The primary objective is to measure mobile client execution metrics:
-* **Proof Generation Time** (Groth16 / Circom via MoPro)
-* **Proof Verification Time** (On-device and Server round-trip)
-* **Memory Footprint & Peak Heap Usage** during witness generation and proving (PERHAPS)
-* **Battery Drain** during repeated cryptographic execution (PERHAPS)
+The primary objective is to measure mobile client and network execution metrics:
+* **Proof Generation Time** (Groth16 / Circom via MoPro / Arkworks FFI)
+* **Server Verification & HTTP Latency** (Measured round-trip to the Rust Axum verification server)
+* **Memory Footprint & Peak Heap Usage** (Real-time tracking of VmHWM and native heap deltas)
+* **Thermal Status Monitoring** (Detecting CPU throttling during heavy cryptographic proving)
 
 ---
 
@@ -32,73 +32,81 @@ The app enforces a strict **Feature-by-Layer Clean Architecture**. Hardware driv
 
 ```directory
 app/src/main/java/io/github/nicolaspurr/civicwallet/
-│   MainActivity.kt                       # Edge-to-edge system window orchestration
-│   SmartWalletApplication.kt             # Hilt application target
+│   MainActivity.kt                      # CLI parsing & system window orchestration
+│   SmartWalletApplication.kt            # Hilt application target
 │
-├───core                                  # Independent core primitives & drivers
-│   ├───di
-│   │       BiometricModule.kt            # Binds hardware authenticator streams and sink
-│   │       CoreModule.kt                 # Global infrastructure (ModelManager)
-│   │       DispatchersModule.kt          # Coroutine threading boundaries (@IoDispatcher, @DefaultDispatcher)
-│   │       NetworkModule.kt              # OkHttpClient timeouts & connection pooling
-│   │       WalletModule.kt               # Prover client definitions & camera single-threaded executor
+├───core                                 # Independent core primitives & drivers
+│   ├───di                                   # Dependency injection modules for core infrastructure
+│   │       BiometricModule.kt                   # Binds hardware authenticator streams and sink
+│   │       CoreModule.kt                        # Global infrastructure (ModelManager)
+│   │       DispatchersModule.kt                 # Coroutine threading boundaries (@IoDispatcher...)
+│   │       NetworkModule.kt                     # OkHttpClient timeouts & connection pooling
+│   │       WalletModule.kt                      # Prover client definitions & camera executor
 │   │
-│   ├───hardware
-│   │       BiometricAuthenticator.kt     # Read-only streaminterface for UI consumers
-│   │       BiometricAuthenticatorImpl.kt # Shared flow capture stream engine & sink implementation
-│   │       FaceAnalyzer.kt               # Scoped CameraX frame processor
+│   ├───hardware                             # Hardware authenticators and camera frame analysis
+│   │       BiometricAuthenticator.kt            # Read-only streaminterface for UI consumers
+│   │       BiometricAuthenticatorImpl.kt        # Shared flow stream engine & sink implementation
+│   │       FaceAnalyzer.kt                      # Scoped CameraX frame processor
 │   │
-│   ├───ml
-│   │       ModelManager.kt               # Neural engine runtime lifecycle contract
-│   │       TfLiteModelManager.kt         # Memory-mapped TFLite inference runner
+│   ├───ml                                   # Neural network models and inference runtimes
+│   │       ModelManager.kt                      # Neural engine runtime lifecycle contract
+│   │       TfLiteModelManager.kt                # Memory-mapped TFLite inference runner
 │   │
-│   ├───theme
-│   │       Color.kt / Theme.kt / Type.kt # Compose design tokens & system bar sync
+│   ├───theme                                # Jetpack Compose styling and design tokens
+│   │       Color.kt / Theme.kt / Type.kt        # Compose design tokens & system bar sync
 │   │
-│   └───zk
-│           ZkProofEngine.kt              # Abstract cryptographic boundary interface
-│           ZkProofEngineImpl.kt          # Native MoPro engine client implementation
-│           ZkProofResult.kt              # Benchmarking metadata payload data class
-│           ZkeyStorageManager.kt         # Asset extraction & SHA-256 key hash validator
+│   └───zk                                   # Zero-Knowledge proving engines, circuits, & benchmark
+│           NativeMemoryTracker.kt               # Memory benchmarking
+│           ZkCircuit.kt                         # Circuit input JSON contracts, CLI circuit map
+│           ZkProofEngine.kt                     # Abstract cryptographic boundary interface
+│           ZkProofEngineImpl.kt                 # Native MoPro engine client implementation
+│           ZkProofResult.kt                     # Benchmarking metadata payload data class
+│           ZkeyStorageManager.kt                # Asset extraction & SHA-256 key hash validator
 │
-└───feature
-    └───payment                                         # Payment domain & execution flow
-        ├───data
-        │   ├───di
-        │   │       PaymentDataModule.kt                # Singleton binding definitions
+└───feature                              # Modular business features and user workflows
+    └───payment                              # Payment domain & execution flow
+        ├───data                                 # Data sources, session handling, and repositories
+        │   ├───di                                   # Singleton binding definitions for data layer
+        │   │       PaymentDataModule.kt                 # Singleton binding definitions
         │   │
-        │   └───session
-        │           BiometricSessionOrchestratorImpl.kt # Mutex-serialized session coordinator
-        │           PaymentSessionRepositoryImpl.kt     # Volatile single-use in-memory proof buffer
-        │           PaymentSettlementRepositoryImpl.kt  # OkHttp client for Axum backend (10.0.2.2:8080)
+        │   └───session                              # Session persistence, coordinators, clients
+        │           BiometricSessionOrchestratorImpl.kt  # Mutex-serialized session coordinator
+        │           PaymentSessionRepositoryImpl.kt      # Volatile proof buffer
+        │           PaymentSettlementRepositoryImpl.kt   # OkHttp client for Axum backend
         │
-        ├───domain
-        │   ├───session
+        ├───domain                               # Business logic, repo contracts, and interactors
+        │   ├───session                              # Contracts for session state and repositories
         │   │       BiometricSessionOrchestrator.kt
         │   │       PaymentSessionRepository.kt
         │   │       PaymentSettlementRepository.kt
         │   │
-        │   └───interactor
-        │           ZkProofInteractor.kt                 # Orchestrates proof generation & session storage
+        │   └───interactor                           # Use case interactors managing payment flows
+        │           ZkProofInteractor.kt                 # Proof generation & session storage
         │           SubmitPaymentInteractor.kt           # Transaction settlement execution
         │
-        └───presentation
-            ├───di
-            │       PaymentPresentationModule.kt # ViewModel scope bindings
+        └───presentation                         # JetpackCompose components, ViewModels, navigation
+            ├───di                                   # ViewModel scope bindings for pres. layer
+            │       PaymentPresentationModule.kt         # ViewModel scope bindings
             │
-            ├───component
-            │       BiometricCameraPreview.kt    # CameraX surface view component
+            ├───component                            # Reusable UI components
+            │       BiometricCameraPreview.kt            # CameraX surface view component
             │
-            ├───navigation
-            │       PaymentNavGraph.kt           # Compose navigation graph
-            │       Screen.kt                    # Type-safe navigation routes
+            ├───navigation                           # Navigation routes and screen graphs
+            │       PaymentNavGraph.kt                   # Compose navigation graph
+            │       Screen.kt                            # Type-safe navigation routes
             │
-            └───screen
-                    MainPaymentScreen.kt         # Payment options, biometrics bypass
-                    ScanScreen.kt                # Biometric scan UI
-                    SuccessScreen.kt             # Post-authorization summary layout
-                    UnauthorizedScreen.kt        # Verification fail/override terminal
-                    VerifyingScreen.kt           # Lifecycle-aware transaction monitor
+            └───screen                               # Screen composables for payment lifecycle
+                    MainPaymentScreen.kt                 # Payment options, biometrics bypass
+                    ScanScreen.kt                        # Biometric scan UI
+                    SuccessScreen.kt                     # Post-authorization summary layout
+                    UnauthorizedScreen.kt                # Verification fail/override terminal
+                    VerifyingScreen.kt                   # Lifecycle-aware transaction monitor
+
+                BiometricViewModel.kt                # Biometric lifecycle and UI transitions
+                MainViewModel.kt                     # Payment flow actions in UI
+                OverrideViewModel.kt                 # Manual administrative override flows
+                PaymentViewModel.kt                  # Navigation & events during payment settlement
+
 ```
 
 ## Layer Responsibilities & Isolation Rules
@@ -167,7 +175,7 @@ Zero-Knowledge operations execute in Rust via [MoPro](https://github.com/zkmopro
 │                    NATIVE BOUNDARY                      │
 ├─────────────────────────────────────────────────────────┤
 │ [ Rust libmopro.so ]                                    │
-│  1. generateCircomProof() -> ARKWORKS Groth16 Prover   │
+│  1. generateCircomProof() -> ARKWORKS Groth16 Prover    │
 │  2. verifyCircomProof()   -> On-device verification     │
 └─────────────────────────────────────────────────────────┘
        │

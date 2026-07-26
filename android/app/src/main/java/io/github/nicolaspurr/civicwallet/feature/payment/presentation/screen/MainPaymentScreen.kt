@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import io.github.nicolaspurr.civicwallet.core.zk.ZkCircuitInput
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.MainUiEvent
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.MainViewModel
 import kotlinx.coroutines.flow.collectLatest
@@ -47,6 +48,7 @@ import kotlinx.coroutines.flow.collectLatest
 fun MainPaymentScreen(
     onNavigateToScan: () -> Unit,
     onNavigateToVerifying: () -> Unit,
+    circuitInput: ZkCircuitInput,
     viewModel: MainViewModel = hiltViewModel()
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
@@ -138,7 +140,7 @@ fun MainPaymentScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Button(
-                    onClick = { viewModel.onInitiateWithBiometrics() },
+                    onClick = { viewModel.onInitiateWithBiometrics(circuitInput) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
@@ -151,7 +153,7 @@ fun MainPaymentScreen(
                 }
 
                 OutlinedButton(
-                    onClick = { viewModel.onInitiateBypassBiometrics() },
+                    onClick = { viewModel.onInitiateBypassBiometrics(circuitInput) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),

@@ -4,10 +4,10 @@ import io.github.nicolaspurr.civicwallet.core.di.DefaultDispatcher
 import io.github.nicolaspurr.civicwallet.core.hardware.BiometricAuthenticator
 import io.github.nicolaspurr.civicwallet.core.ml.ModelManager
 import io.github.nicolaspurr.civicwallet.core.ml.ModelState
+import io.github.nicolaspurr.civicwallet.core.zk.ZkCircuitInput
 import io.github.nicolaspurr.civicwallet.core.zk.ZkProofEngine
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.BiometricSessionOrchestrator
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.SessionState
-import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.PaymentSessionRepository
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -22,6 +22,7 @@ import kotlinx.coroutines.sync.withLock
 import java.io.Closeable
 import javax.inject.Inject
 import javax.inject.Named
+import io.github.nicolaspurr.civicwallet.feature.payment.domain.interactor.ZkProofInteractor
 
 /**
  * Implementation of [BiometricSessionOrchestrator] coordinating ML and biometrics.
@@ -47,7 +48,7 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
     private val modelManager: ModelManager,
     private val authenticator: BiometricAuthenticator,
     private val zkProofEngine: ZkProofEngine,
-    private val paymentSessionRepository: PaymentSessionRepository,
+    private val zkProofInteractor: ZkProofInteractor,
     @param:DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher,
     @param:Named("TriggerThreshold") private val triggerThreshold: Float
 ) : BiometricSessionOrchestrator, Closeable {
@@ -67,8 +68,13 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
     /** Manages physical RAM interpreter loading state. */
     private var isModelReady = false
 
-    override fun start() {
+    /** Holds the active target input contract for the current payment session. */
+
+    private var activeCircuitInput: ZkCircuitInput? = null
+    override fun start(circuitInput: ZkCircuitInput) {
         if (activeJob?.isActive == true) return
+
+        this.activeCircuitInput = circuitInput
 
         activeJob = orchestratorScope.launch {
             _sessionState.value = SessionState.Initializing
@@ -111,7 +117,6 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
                 authenticator.confidenceFlow.collect { rawScore ->
                     // Declare flags INSIDE the collect lambda so they reset on every frame
                     var shouldExecuteProof = false
-                    var targetConfidence = 0f
 
                     stateMutex.withLock {
                         val currentState = _sessionState.value
@@ -121,7 +126,6 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
                             if (clampedScore >= triggerThreshold) {
                                 _sessionState.value = SessionState.GeneratingProof
                                 shouldExecuteProof = true
-                                targetConfidence = clampedScore
                             } else {
                                 _sessionState.value = SessionState.Ready(clampedScore)
                             }
@@ -129,7 +133,14 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
                     }
 
                     if (shouldExecuteProof) {
-                        executeProofPipeline(targetConfidence)
+                        val input = activeCircuitInput
+                        if (input != null) {
+                            executeProofPipeline(input)
+                        } else {
+                            stateMutex.withLock {
+                                _sessionState.value = SessionState.Error("No active circuit input provided.")
+                            }
+                        }
                     }
                 }
             }
@@ -139,10 +150,10 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
     /**
      * Executes the ZK computation pipeline asynchronously.
      */
-    private suspend fun executeProofPipeline(confidence: Float) {
-        zkProofEngine.generateProof(confidence)
-            .onSuccess { proofResult ->
-                paymentSessionRepository.storeResult(proofResult)
+    private suspend fun executeProofPipeline(circuitInput: ZkCircuitInput) {
+        // Delegated directly to the Interactor use case
+        zkProofInteractor.execute(circuitInput)
+            .onSuccess {
                 stateMutex.withLock {
                     _sessionState.value = SessionState.ProofGenerated
                 }
@@ -157,16 +168,15 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
     }
 
     override fun reset() {
+        val currentInput = activeCircuitInput
         activeJob?.cancel()
         orchestratorScope.launch {
             stateMutex.withLock {
-                if (isModelReady) {
-                    _sessionState.value = SessionState.Ready(0f)
-                } else {
-                    _sessionState.value = SessionState.Idle
-                }
+                _sessionState.value = if (isModelReady) SessionState.Ready(0f) else SessionState.Idle
             }
-            start()
+            if (currentInput != null) {
+                start(currentInput)
+            }
         }
     }
 
@@ -185,7 +195,7 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
 
     /**
      * Cleanly shuts down the orchestrator, cancels all ongoing calculations, and terminates
-     * the root coroutine scope to eliminate potential memory and thread leaks.
+     * the root coroutine scope.
      */
     override fun close() {
         stop()

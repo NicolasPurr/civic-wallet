@@ -3,6 +3,7 @@ package io.github.nicolaspurr.civicwallet.feature.payment.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.nicolaspurr.civicwallet.core.zk.ZkCircuitInput
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.BiometricSessionOrchestrator
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.interactor.ZkProofInteractor
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -56,14 +57,14 @@ class MainViewModel @Inject constructor(
     val uiEvent: SharedFlow<MainUiEvent> = _uiEvent.asSharedFlow()
 
     /**
-     * Bypasses biometric authentication to execute ZK proof generation directly.
-     *
-     * Generates a proof with a fixed 100% confidence (`1.0f`) for benchmark testing.
-     * Emits [MainUiEvent.NavigateToVerifying] when generation succeeds.
+     * Starts a biometric authentication session with the specified [circuitInput]
+     * and notifies the UI to navigate to the biometric scan screen.
      */
-    fun onInitiateWithBiometrics() {
+    fun onInitiateWithBiometrics(
+        circuitInput: ZkCircuitInput
+    ) {
         viewModelScope.launch {
-            biometricSessionOrchestrator.start()
+            biometricSessionOrchestrator.start(circuitInput)
             _uiEvent.emit(MainUiEvent.NavigateToBiometricScan)
         }
     }
@@ -71,18 +72,22 @@ class MainViewModel @Inject constructor(
     /**
      * Bypasses facial biometric matching to trigger immediate ZK proof generation.
      *
-     * Supplies a fixed 100% confidence value (`1.0f`) to simulate a perfect match,
-     * enabling smooth benchmarking on emulators and non-TEE devices.
+     * Executes proof generation directly with the provided [circuitInput]
+     * to enable smooth benchmarking on emulators and non-TEE devices.
+     *
      */
-    fun onInitiateBypassBiometrics() {
+    fun onInitiateBypassBiometrics(
+        circuitInput: ZkCircuitInput
+    ) {
         viewModelScope.launch {
-            // Generate ZK proof directly with 100% confidence (1.0f) for the bypass benchmark
-            zkProofInteractor.execute(confidence = 1.0f)
+            zkProofInteractor.execute(circuitInput)
                 .onSuccess {
                     _uiEvent.emit(MainUiEvent.NavigateToVerifying)
                 }
                 .onFailure { error ->
-                    _uiEvent.emit(MainUiEvent.ShowError(error.message ?: "Proof generation failed"))
+                    _uiEvent.emit(MainUiEvent.ShowError(
+                        error.localizedMessage ?: "Proof generation failed"
+                    ))
                 }
         }
     }

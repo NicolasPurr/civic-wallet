@@ -18,6 +18,16 @@ interface PaymentSessionRepository {
     fun storeResult(result: ZkProofResult)
 
     /**
+     * Non-destructive peek at the currently cached proof result.
+     *
+     * Safe for inspection, logging, or metric aggregation without clearing
+     * the underlying buffer required for settlement.
+     *
+     * @return The cached [ZkProofResult], or `null` if no proof has been generated yet.
+     */
+    fun getStoredResult(): ZkProofResult?
+
+    /**
      * Consumes the cached proof result for network settlement.
      *
      * To prevent the app from accidentally double-submitting the same transaction,
