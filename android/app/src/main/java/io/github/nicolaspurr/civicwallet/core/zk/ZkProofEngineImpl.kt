@@ -1,11 +1,16 @@
 package io.github.nicolaspurr.civicwallet.core.zk
 
+import android.content.Context
+import android.os.Build
+import android.os.PowerManager
+import android.util.Log
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.nicolaspurr.civicwallet.core.di.DefaultDispatcher
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import kotlin.system.measureTimeMillis
-import android.util.Log
+
 
 /**
  * Native cryptographic bridge for MoPro zero-knowledge proofs.
@@ -14,18 +19,27 @@ import android.util.Log
  * execution does not block the main thread or UI orchestrators.
  */
 class ZkProofEngineImpl @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val zkeyStorageManager: ZkeyStorageManager,
     @param:DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher
 ) : ZkProofEngine {
 
-    override suspend fun generateProof(confidence: Float): Result<ZkProofResult> =
+    override suspend fun generateProof(circuitInput: ZkCircuitInput): Result<ZkProofResult> =
         withContext(defaultDispatcher) {
             runCatching {
-                val scaledConfidence = (confidence * 100).toInt()
-                val circuitInputsJson = """{"confidence": ["$scaledConfidence"]}"""
+                //val zkeyFile = File(context.filesDir, "cbdc.zkey")
+                //if (!zkeyFile.exists()) {
+                //  throw FileNotFoundException("Benchmark zkey not found at ${zkeyFile.absolutePath}. Ensure adb push succeeded.")
+                //
+                //val zkeyPath = zkeyFile.absolutePath
 
-                // Delegated to the storage manager
-                val zkeyPath = zkeyStorageManager.getOrExtractZkey("cbdc.zkey")
+                // Resolved polymorphically from the input object
+                val zkeyPath = zkeyStorageManager.getOrExtractZkey(circuitInput.zkeyFilename)
+                val circuitInputsJson = circuitInput.toCircomInputsJson()
+
+                // BENCHMARK: Memory & Thermal state before Rust FFI
+                val nativeHeapBeforeMb = NativeMemoryTracker.getNativeHeapAllocatedMb()
+                val thermalStatusStr = getThermalStatusString()
 
                 var proofResult: uniffi.mopro.CircomProofResult? = null
 
@@ -40,6 +54,21 @@ class ZkProofEngineImpl @Inject constructor(
 
                 requireNotNull(proofResult) { "MoPro returned a null proof result" }
 
+                val isValid = try {
+                    uniffi.mopro.verifyCircomProof(
+                        zkeyPath = zkeyPath,
+                        proofResult = proofResult,
+                        proofLib = uniffi.mopro.ProofLib.ARKWORKS
+                    )
+                } catch (e: Exception) {
+                    Log.e("ZK_DEBUG", "FFI verifyCircomProof threw an exception!", e)
+                    false
+                }
+
+                if (!isValid) {
+                    throw IllegalStateException("Generated proof failed local verification.")
+                }
+
                 // BENCHMARK: verification
                 val verificationTimeMs = measureTimeMillis {
                     val isValid = uniffi.mopro.verifyCircomProof(
@@ -48,17 +77,22 @@ class ZkProofEngineImpl @Inject constructor(
                         proofLib = uniffi.mopro.ProofLib.ARKWORKS
                     )
                     if (!isValid) throw IllegalStateException(
-                        "Generated proof failed local verification.")
+                        "Generated proof failed local verification."
+                    )
                 }
 
-                // Serialize and calculate metrics
-                // For the benchmark, we just need the byte size
+                // BENCHMARK: Memory peak & delta
+                val nativeHeapAfterMb = NativeMemoryTracker.getNativeHeapAllocatedMb()
+                val nativeHeapDeltaMb = nativeHeapAfterMb - nativeHeapBeforeMb
+                val peakVmHwmMb = NativeMemoryTracker.getMemoryHighWaterMarkMb()
+
+                // Serialise and calculate metrics
                 val a = proofResult.proof.a
                 val b = proofResult.proof.b
                 val c = proofResult.proof.c
                 val inputs = proofResult.inputs
 
-                // Format to match the server's SnarkJsProof & VerifyRequest structs
+                // JSON formatting
                 val proofJson = """
                 {
                     "proof": {
@@ -76,29 +110,39 @@ class ZkProofEngineImpl @Inject constructor(
 
                 val proofSize = proofJson.toByteArray(Charsets.UTF_8).size
 
-                // TEMP LOG BLOCK
-                Log.d(
-                    "CBDC_BENCHMARK", """
-                        ====================================
-                        ZK-SNARK PERFORMANCE METRICS
-                        Proof Generation Time: ${generationTimeMs}ms
-                        Local Verification Time: ${verificationTimeMs}ms
-                        Total Engine Time: ${generationTimeMs + verificationTimeMs}ms
-                        Proof Size: $proofSize bytes
-                        ====================================
-                    """.trimIndent()
-                )
-
                 ZkProofResult(
                     proofJson = proofJson,
                     proofSizeInBytes = proofSize,
-                    // UniFFI bundles Witness and Proof generation into a single FFI call
-                    // To separate these natively, we would need to modify the MoPro Rust
-                    // scaffolding to return a custom struct containing the split timestamps
                     witnessGenTimeMs = 0L,
                     proofGenTimeMs = generationTimeMs,
-                    totalEngineTimeMs = generationTimeMs + verificationTimeMs
+                    totalEngineTimeMs = generationTimeMs + verificationTimeMs,
+                    nativeHeapBeforeMb = nativeHeapBeforeMb,
+                    nativeHeapAfterMb = nativeHeapAfterMb,
+                    nativeHeapDeltaMb = nativeHeapDeltaMb,
+                    vmHwmMb = peakVmHwmMb,
+                    thermalStatus = thermalStatusStr
                 )
             }
         }
+
+    /**
+     * Inspects current hardware thermal status via Android PowerManager (API 29+).
+     */
+    private fun getThermalStatusString(): String {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            when (powerManager?.currentThermalStatus) {
+                PowerManager.THERMAL_STATUS_NONE -> "NONE"
+                PowerManager.THERMAL_STATUS_LIGHT -> "LIGHT"
+                PowerManager.THERMAL_STATUS_MODERATE -> "MODERATE"
+                PowerManager.THERMAL_STATUS_SEVERE -> "SEVERE"
+                PowerManager.THERMAL_STATUS_CRITICAL -> "CRITICAL"
+                PowerManager.THERMAL_STATUS_EMERGENCY -> "EMERGENCY"
+                PowerManager.THERMAL_STATUS_SHUTDOWN -> "SHUTDOWN"
+                else -> "UNKNOWN"
+            }
+        } else {
+            "UNSUPPORTED_API"
+        }
+    }
 }

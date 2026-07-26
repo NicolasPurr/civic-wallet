@@ -22,6 +22,12 @@ class PaymentSessionRepositoryImpl @Inject constructor() : PaymentSessionReposit
         }
     }
 
+    override fun getStoredResult(): ZkProofResult? {
+        return synchronized(this) {
+            cachedResult
+        }
+    }
+
     override fun consumeResult(): ZkProofResult {
         return synchronized(this) {
             val result = cachedResult ?: throw IllegalStateException("No valid ZK proof in session memory.")

@@ -15,6 +15,9 @@ enum class SettlementStep {
     /** Preparing the localised transaction details and proof reference. */
     INITIALIZING,
 
+    /** Preparing the localised transaction details and proof reference. */
+    GENERATING_PROOF,
+
     /** Transmitting the ZK proof payload to the remote ledger or cloud server. */
     SUBMITTING_PROOF,
 

@@ -41,7 +41,8 @@ class PaymentSettlementRepositoryImpl @Inject constructor(
     override suspend fun submitZkProof(proof: String): Result<Double> = withContext(ioDispatcher) {
         try {
             // 10.0.2.2 routes to the host machine's localhost from the Android emulator
-            val serverUrl = "http://10.0.2.2:8080/verify"
+            val serverUrl = "http://localhost:8080/verify"
+            //val serverUrl = "http://10.0.2.2:8080/verify"
 
             // Construct HTTP request with JSON proof body
             val requestBody = proof.toRequestBody(jsonMediaType)
@@ -51,7 +52,7 @@ class PaymentSettlementRepositoryImpl @Inject constructor(
                 .build()
 
             // Synchronously execute request on the I/O dispatcher.
-            // `.use` guarantees automatic resource cleanup and response body closure.
+            // `.use` guarantees automatic resource clean-up and response body closure.
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     return@withContext Result.failure(

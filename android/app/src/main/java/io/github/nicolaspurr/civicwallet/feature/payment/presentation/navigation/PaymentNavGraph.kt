@@ -1,6 +1,7 @@
 package io.github.nicolaspurr.civicwallet.feature.payment.presentation.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation.NavBackStackEntry
@@ -10,6 +11,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.navigation
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.BiometricViewModel
+import io.github.nicolaspurr.civicwallet.feature.payment.presentation.MainUiEvent
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.MainViewModel
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.PaymentViewModel
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.OverrideViewModel
@@ -18,6 +20,8 @@ import io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen.Sca
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen.SuccessScreen
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen.UnauthorizedScreen
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen.VerifyingScreen
+import io.github.nicolaspurr.civicwallet.core.zk.ZkCircuitInput
+
 
 /**
  * Constructs the Jetpack Compose navigation host for the payment feature graph.
@@ -28,7 +32,12 @@ import io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen.Ver
  * @param navController Root navigation controller instance.
  */
 @Composable
-fun PaymentNavGraph(navController: NavHostController) {
+fun PaymentNavGraph(
+    navController: NavHostController,
+    circuitInput: ZkCircuitInput,
+    isBenchmarkMode: Boolean = false,
+    onBenchmarkComplete: () -> Unit = {}
+) {
     NavHost(
         navController = navController,
         startDestination = Screen.GRAPH_PAYMENT_FLOW
@@ -42,8 +51,27 @@ fun PaymentNavGraph(navController: NavHostController) {
             composable(Screen.Main.route) {
                 val mainViewModel: MainViewModel = hiltViewModel()
 
+                // Observe navigation events
+                LaunchedEffect(Unit) {
+                    mainViewModel.uiEvent.collect { event ->
+                        when (event) {
+                            is MainUiEvent.NavigateToVerifying -> navController.navigate(Screen.Verifying.route)
+                            is MainUiEvent.NavigateToBiometricScan -> navController.navigate(Screen.Scan.route)
+                            is MainUiEvent.ShowError -> { /* handle error */ }
+                        }
+                    }
+                }
+
+                // Auto-trigger bypass proof generation if launched in benchmark mode
+                LaunchedEffect(isBenchmarkMode) {
+                    if (isBenchmarkMode) {
+                        mainViewModel.onInitiateBypassBiometrics(circuitInput)
+                    }
+                }
+
                 MainPaymentScreen(
                     viewModel = mainViewModel,
+                    circuitInput = circuitInput,
                     onNavigateToScan = {
                         navController.navigate(Screen.Scan.route)
                     },
@@ -56,6 +84,10 @@ fun PaymentNavGraph(navController: NavHostController) {
             // Camera Biometric Scan Destination
             composable(Screen.Scan.route) {
                 val biometricViewModel: BiometricViewModel = hiltViewModel()
+
+                LaunchedEffect(circuitInput) {
+                    biometricViewModel.startSession(circuitInput)
+                }
 
                 ScanScreen(
                     viewModel = biometricViewModel,
@@ -80,17 +112,33 @@ fun PaymentNavGraph(navController: NavHostController) {
                     parentRoute = Screen.GRAPH_PAYMENT_FLOW
                 )
 
+                // Set benchmark mode in ViewModel so it logs results and signals exit
+                paymentViewModel.setBenchmarkMode(isBenchmarkMode)
+
+                //
+                LaunchedEffect(circuitInput) {
+                    paymentViewModel.startSettlement(circuitInput)
+                }
+
                 VerifyingScreen(
                     viewModel = paymentViewModel,
                     onSuccess = { amount ->
-                        // Pop Verifying to ensure generation cannot be re-triggered by back press
-                        navController.navigate(Screen.Success.createRoute(amount)) {
-                            popUpTo(Screen.Verifying.route) { inclusive = true }
+                        if (isBenchmarkMode) {
+                            onBenchmarkComplete()
+                        } else {
+                            // Pop Verifying to ensure generation cannot be re-triggered by back press
+                            navController.navigate(Screen.Success.createRoute(amount)) {
+                                popUpTo(Screen.Verifying.route) { inclusive = true }
+                            }
                         }
                     },
                     onFail = { source ->
-                        navController.navigate(Screen.Unauthorized.createRoute(source)) {
-                            popUpTo(Screen.Verifying.route) { inclusive = true }
+                        if (isBenchmarkMode) {
+                            onBenchmarkComplete()
+                        } else {
+                            navController.navigate(Screen.Unauthorized.createRoute(source)) {
+                                popUpTo(Screen.Verifying.route) { inclusive = true }
+                            }
                         }
                     }
                 )
@@ -115,7 +163,7 @@ fun PaymentNavGraph(navController: NavHostController) {
                 )
             }
 
-            // Authorization / Proof Failure Destination
+            // Authorisation / Proof Failure Destination
             composable(
                 route = Screen.Unauthorized.route,
                 arguments = Screen.Unauthorized.arguments

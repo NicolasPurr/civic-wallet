@@ -12,6 +12,8 @@ import androidx.navigation.compose.rememberNavController
 import io.github.nicolaspurr.civicwallet.core.theme.SmartWalletTheme
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.navigation.PaymentNavGraph
 import dagger.hilt.android.AndroidEntryPoint
+import io.github.nicolaspurr.civicwallet.core.zk.CircuitType
+import io.github.nicolaspurr.civicwallet.core.zk.ZkCircuitInputFactory
 
 /**
  * Primary Activity and entry point for the Civic Wallet application.
@@ -23,9 +25,16 @@ import dagger.hilt.android.AndroidEntryPoint
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Enforces edge-to-edge system window bar insets across modern Android versions
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+
+        // Read CLI Flags from ADB Intent
+        val isBenchmarkMode = intent?.getBooleanExtra("benchmark_mode", false) ?: false
+        val circuitKey = intent?.getStringExtra("target_circuit")
+
+        // Resolve Circuit Input
+        val selectedCircuitType = CircuitType.fromKey(circuitKey)
+        val circuitInput = ZkCircuitInputFactory.createDefaultInput(selectedCircuitType)
 
         setContent {
             SmartWalletTheme {
@@ -34,7 +43,15 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val navController = rememberNavController()
-                    PaymentNavGraph(navController = navController)
+                    PaymentNavGraph(
+                        navController = navController,
+                        circuitInput = circuitInput,
+                        isBenchmarkMode = isBenchmarkMode,
+                        onBenchmarkComplete = {
+                            // Finish activity after logging so ADB script can proceed
+                            finishAndRemoveTask()
+                        }
+                    )
                 }
             }
         }

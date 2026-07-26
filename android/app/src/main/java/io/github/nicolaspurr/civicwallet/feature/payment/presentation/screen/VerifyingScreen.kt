@@ -70,6 +70,7 @@ fun VerifyingScreen(
     val statusText = when (val state = uiState) {
         is PaymentUiState.Verifying -> when (state.step) {
             SettlementStep.INITIALIZING -> "Initializing cryptographic validation..."
+            SettlementStep.GENERATING_PROOF -> "Generating Zero-Knowledge Proof..."
             SettlementStep.SUBMITTING_PROOF -> "Submitting Zero-Knowledge Proof..."
             SettlementStep.VERIFYING_CONSTRAINTS -> "Verifying cryptographic witness constraints..."
         }

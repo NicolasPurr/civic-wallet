@@ -1,5 +1,6 @@
 package io.github.nicolaspurr.civicwallet.feature.payment.domain.interactor
 
+import io.github.nicolaspurr.civicwallet.core.zk.ZkCircuitInput
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.PaymentSessionRepository
 import io.github.nicolaspurr.civicwallet.core.zk.ZkProofEngine
 import javax.inject.Inject
@@ -28,26 +29,27 @@ class ZkProofInteractor @Inject constructor(
 
 
     /**
-     * Triggers the cryptographic proof generation engine using the provided biometric [confidence].
+     * Accepts ANY polymorphic [ZkCircuitInput], generates the proof,
+     * and persists metrics into [PaymentSessionRepository].
      *
      * On successful generation, the resulting proof payload and engine timing metrics
      * are written directly into the [PaymentSessionRepository].
      *
-     * @param confidence A normalised score (0.0 to 1.0) indicating biometric match quality.
+     * @param circuitInput Input contract for the circuit
      * @return A [Result] indicating whether the proof was successfully generated and stored.
      */
-    suspend fun execute(confidence: Float): Result<Unit> {
+    suspend fun execute(circuitInput: ZkCircuitInput): Result<Unit> {
         if (isGenerating) {
-            return Result.failure(IllegalStateException("Proof generation already in progress."))
+            return Result.failure(IllegalStateException("Proof generation already ongoing."))
         }
 
         return executionMutex.withLock {
             if (isGenerating) {
-                return Result.failure(IllegalStateException("Proof generation already in progress."))
+                return Result.failure(IllegalStateException("Proof generation already ongoing."))
             }
             isGenerating = true
             try {
-                val result = zkEngine.generateProof(confidence)
+                val result = zkEngine.generateProof(circuitInput)
                 result.onSuccess { proof ->
                     paymentSessionRepository.storeResult(proof)
                 }

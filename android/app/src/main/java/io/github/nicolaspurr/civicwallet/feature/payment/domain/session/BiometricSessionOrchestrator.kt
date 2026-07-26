@@ -1,5 +1,6 @@
 package io.github.nicolaspurr.civicwallet.feature.payment.domain.session
 
+import io.github.nicolaspurr.civicwallet.core.zk.ZkCircuitInput
 import kotlinx.coroutines.flow.StateFlow
 import java.io.Closeable
 
@@ -64,7 +65,7 @@ interface BiometricSessionOrchestrator : Closeable {
      *
      * Calling this while a session is already running has no effect.
      */
-    fun start()
+    fun start(circuitInput: ZkCircuitInput)
 
     /**
      * Resets the biometric confidence state back to baseline without fully releasing

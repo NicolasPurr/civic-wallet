@@ -15,10 +15,9 @@ interface ZkProofEngine {
      * This is a pure suspend function meant to be executed off the main thread (typically on a
      * CPU-optimised dispatcher like `Dispatchers.Default`).
      *
-     * @param confidence Normalized biometric authentication score (0.0 to 1.0) passed as a circuit
-     * parameter.
+     * @param circuitInput Input data object.
      * @return A [Result] holding [ZkProofResult] metrics on successful generation, or an error if
      * witness/proof steps fail.
      */
-    suspend fun generateProof(confidence: Float): Result<ZkProofResult>
+    suspend fun generateProof(circuitInput: ZkCircuitInput): Result<ZkProofResult>
 }
