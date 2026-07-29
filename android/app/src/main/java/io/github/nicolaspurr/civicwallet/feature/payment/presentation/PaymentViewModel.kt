@@ -162,13 +162,13 @@ class PaymentViewModel @Inject constructor(
     ) {
         val jsonPayload = JSONObject().apply {
             put("success", success)
-            put("witnessAndProofGenTimeMs", zkResult?.proofGenTimeMs ?: 0L) // Twój Główny KPI!
+            put("witnessAndProofGenTimeMs", zkResult?.proofGenTimeMs ?: 0L) // main KPI
             put("localVerificationTimeMs", (zkResult?.totalEngineTimeMs ?: 0L) - (zkResult?.proofGenTimeMs ?: 0L))
             put("totalEngineTimeMs", zkResult?.totalEngineTimeMs ?: 0L)
             put("proofSizeInBytes", zkResult?.proofSizeInBytes ?: 0)
             put("serverProcessingTimeMs", serverTimeMs)
 
-            // Native Memory & Thermal Metrics
+            // Native memory & thermal metrics
             put("nativeHeapDeltaMb", zkResult?.nativeHeapDeltaMb ?: 0L)
             put("vmHwmMb", zkResult?.vmHwmMb ?: 0L)
             put("thermalStatus", zkResult?.thermalStatus ?: "UNKNOWN")
