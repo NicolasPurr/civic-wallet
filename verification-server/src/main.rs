@@ -1,16 +1,22 @@
 //! # Groth16 Proof Verification Server
 //!
-//! An Axum HTTP server that receives SnarkJS proofs and public inputs, 
+//! An Axum HTTP server that receives SnarkJS proofs and public inputs,
 //! verifies them using the BN254 curve via Arkworks, and returns validation results.
 
-use axum::{http::StatusCode, routing::post, Json, Router};
+use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 use std::{fs::File, io::BufReader, str::FromStr, time::Instant};
 use ark_bn254::{Bn254, Fq, Fq2, Fr, G1Affine, G2Affine};
 use ark_groth16::{Groth16, PreparedVerifyingKey, Proof, VerifyingKey};
 use ark_snark::SNARK;
 use tower_http::cors::CorsLayer;
+use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
+/// Server connection status to temporary relational SQLite DB in RAM
+#[derive(Clone)]
+struct AppState {
+    db: SqlitePool,
+}
 
 /// SnarkJs JSON representation of a Groth16 proof
 ///
@@ -108,18 +114,83 @@ fn load_pvk() -> Result<PreparedVerifyingKey<Bn254>, String> {
     Groth16::<Bn254>::process_vk(&vk).map_err(|e| format!("Failed to process VK: {e:?}"))
 }
 
+/// Initialises a temporary DB in RAM and generates 10M records.
+async fn init_db() -> SqlitePool {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(50)
+        .connect("sqlite::memory:?cache=shared")
+        .await
+        .unwrap();
+
+    // Turn off journal mode and synchronisation
+    sqlx::query("PRAGMA journal_mode = OFF;").execute(&pool).await.unwrap();
+    sqlx::query("PRAGMA synchronous = OFF;").execute(&pool).await.unwrap();
+
+    // Create tables without primary keys
+    sqlx::query("CREATE TABLE nullifiers (nullifier TEXT);").execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE blacklist (item TEXT);").execute(&pool).await.unwrap();
+
+    println!("Generating 10M records in RAM...");
+    let start_seed = Instant::now();
+
+    // Insert 1K values in one query
+    let chunk_size = 1000;
+    let total = 10_000_000;
+
+    let mut tx = pool.begin().await.unwrap();
+    for chunk in 0..(total / chunk_size) {
+        let mut query_builder = String::from("INSERT INTO nullifiers (nullifier) VALUES ");
+        for i in 0..chunk_size {
+            let idx = chunk * chunk_size + i;
+            if i > 0 {
+                query_builder.push_str(",");
+            }
+            query_builder.push_str(&format!("('test_nullifier_{}')", idx));
+        }
+        sqlx::query(&query_builder).execute(&mut *tx).await.unwrap();
+    }
+    tx.commit().await.unwrap();
+
+    // Create indices after inserting all data
+    println!("Creating index for 10M records...");
+    sqlx::query("CREATE UNIQUE INDEX idx_nullifiers ON nullifiers (nullifier);")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("CREATE UNIQUE INDEX idx_blacklist ON blacklist (item);")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Example record for the black list
+    sqlx::query("INSERT INTO blacklist (item) VALUES ('123456789_EXAMPLE_BLACK_LISTED')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    println!("Databasae ready in RAM. Execution: {:.2?}", start_seed.elapsed());
+
+    pool
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Generating an SQL DB in RAM on server startup
+    let pool = init_db().await;
+    let state = AppState { db: pool };
+
     // Build application routes & attach middleware
     let app = Router::new()
         .route("/verify", post(verify_handler))
         // Allows cross-origin requests from browser clients during development
-        .layer(CorsLayer::permissive());
+        .layer(CorsLayer::permissive())
+        .with_state(state);
 
     // Bind TCP listener to all network interfaces
     let bind_addr = "0.0.0.0:8080";
     let listener = tokio::net::TcpListener::bind(bind_addr).await.unwrap();
-    println!("listening on http://{bind_addr}");
+    println!("Proof verifier listening on http://{bind_addr}");
 
     // Start the Axum web server
     axum::serve(listener, app).await.unwrap();
@@ -141,9 +212,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// * `200 OK` - Proof was evaluated successfully. Check `body.valid` for the outcome.
 /// * `500 Internal Server Error` - Failed to read or parse the verification key.
 async fn verify_handler(
+    State(state): State<AppState>,
     Json(payload): Json<VerifyRequest>,
 ) -> Result<Json<VerifyResponse>, StatusCode> {
     let start = Instant::now();
+
+    println!("Received verification request:");
+    
+    // Get the nullifier
+    let nullifier = payload.public_inputs.first().expect("Missing nullifier in public_inputs");
+
+    // Blacklist check
+    let is_blacklisted: Option<(String,)> = sqlx::query_as("SELECT item FROM blacklist WHERE item = ? LIMIT 1")
+        .bind(nullifier)
+        .fetch_optional(&state.db)
+        .await
+        .unwrap();
+
+    if is_blacklisted.is_some() {
+        println!("REJECT (Blacklisted nullifier in SQL DB)\n");
+        let duration = start.elapsed().as_secs_f64() * 1000.0;
+        return Ok(Json(VerifyResponse {
+            valid: false,
+            processing_time_ms: duration,
+        }));
+    }
+
+    // Nullifier check
+    let is_present: Option<(String,)> = sqlx::query_as("SELECT nullifier FROM nullifiers WHERE nullifier = ? LIMIT 1")
+        .bind(nullifier)
+        .fetch_optional(&state.db)
+        .await
+        .unwrap();
+
+    if is_present.is_some() {
+        println!("REJECT (Nullifier present in SQL DB)\n");
+        let duration = start.elapsed().as_secs_f64() * 1000.0;
+        return Ok(Json(VerifyResponse {
+            valid: false,
+            processing_time_ms: duration,
+        }));
+    }
 
     // Load the verification key from disk
     // NOTE: very comfy for frequent key updates
@@ -160,7 +269,7 @@ async fn verify_handler(
         .map(|s| Fr::from_str(s).unwrap())
         .collect();
 
-        // Map SnarkJS JSON format to Arkworks Proof structure
+    // Map SnarkJS JSON format to Arkworks Proof structure
     let proof = Proof::<Bn254> {
         a: parse_g1(&payload.proof.pi_a),
         b: parse_g2(&payload.proof.pi_b),
@@ -173,7 +282,7 @@ async fn verify_handler(
 
     let duration = start.elapsed().as_secs_f64() * 1000.0;
 
-    println!("Received verification request: {}",
+    println!("{}\n",
         if is_valid { "OK" } else { "REJECT" }
     );
 
