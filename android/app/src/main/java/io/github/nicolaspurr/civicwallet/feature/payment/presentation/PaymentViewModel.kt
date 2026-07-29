@@ -125,7 +125,7 @@ class PaymentViewModel @Inject constructor(
                         // Combine local proof metrics + server verification metrics for ADB logcat
                         logBenchmarkResults(
                             zkResult = localProof,
-                            serverTimeMs = status.generationTimeMs,
+                            serverTimeMs = status.serverVerificationTimeMs.toLong(),
                             success = true,
                             errorMsg = null
                         )
@@ -162,8 +162,8 @@ class PaymentViewModel @Inject constructor(
     ) {
         val jsonPayload = JSONObject().apply {
             put("success", success)
-            put("proofGenTimeMs", zkResult?.proofGenTimeMs ?: 0L)
-            put("witnessGenTimeMs", zkResult?.witnessGenTimeMs ?: 0L)
+            put("witnessAndProofGenTimeMs", zkResult?.proofGenTimeMs ?: 0L) // Twój Główny KPI!
+            put("localVerificationTimeMs", (zkResult?.totalEngineTimeMs ?: 0L) - (zkResult?.proofGenTimeMs ?: 0L))
             put("totalEngineTimeMs", zkResult?.totalEngineTimeMs ?: 0L)
             put("proofSizeInBytes", zkResult?.proofSizeInBytes ?: 0)
             put("serverProcessingTimeMs", serverTimeMs)
@@ -193,6 +193,6 @@ sealed interface PaymentUiState {
     /** Transaction settlement successfully finalised. */
     data object Success : PaymentUiState
 
-    /** Transaction settlement failed with a descriptive error message. */
+    /** Transaction settlement failed with an error message. */
     data class Error(val message: String) : PaymentUiState
 }

@@ -10,6 +10,8 @@ SERVER_DIR="${ROOT_DIR}/verification-server"
 ANDROID_DIR="/mnt/c/civic-wallet/android"
 RESULTS_CSV="${ROOT_DIR}/benchmark_results.csv"
 PACKAGE_NAME="io.github.nicolaspurr.civicwallet"
+SAMPLE_SIZE=31
+
 
 # Initialize CSV Header
 if [ ! -f "$RESULTS_CSV" ]; then
@@ -60,7 +62,8 @@ for circuit_dir in "${CIRCUIT_DIRS[@]}"; do
     echo " Benchmarking Circuit: ${CIRCUIT_NAME}"
     echo "------------------------------------------------------------"
 
-    # 1. Deploy native libraries, Kotlin bindings, & assets to Android source workspace
+    # 1.
+    # Deploy native libraries, Kotlin bindings, & assets to Android source workspace
     echo "[+] Deploying ${CIRCUIT_NAME} native libraries, bindings, and assets..."
     KOTLIN_DEST="${ANDROID_DIR}/app/src/main/java/uniffi/mopro"
     JNILIBS_DEST="${ANDROID_DIR}/app/src/main/jniLibs"
@@ -76,24 +79,28 @@ for circuit_dir in "${CIRCUIT_DIRS[@]}"; do
     #cp "$ZKEY_PATH" "${ASSETS_DEST}/${CIRCUIT_NAME}.zkey"
     cp "$ZKEY_PATH" "${ASSETS_DEST}/cbdc.zkey"
 
-    # 2. Uninstall old app instance from device to purge cached .so dynamic libraries
+    # 2.
+    # Uninstall old app instance from device to purge cached .so dynamic libraries
     echo "[+] Uninstalling previous APK from device..."
     adb_cmd uninstall "${PACKAGE_NAME}" 2>/dev/null || true
 
-    # 3. Clean, rebuild, and reinstall fresh APK via Windows Gradle
+    # 3.
+    # Clean, rebuild, and reinstall fresh APK via Windows Gradle
     echo "[+] Rebuilding and installing fresh Android APK via Gradle..."
     pushd "$ANDROID_DIR" > /dev/null
     cmd.exe /c "gradlew.bat clean installDebug" > /dev/null
     popd > /dev/null
 
-    # 4. Update verification key for Axum backend server
+    # 4.
+    # Update verification key for Axum backend server
     if [ -d "$SERVER_DIR" ]; then
         cp "$VKEY_PATH" "${SERVER_DIR}/verification_key.json"
         #pkill -f "verification-server" || true
         echo "[+] Updated Axum server verification key"
     fi
 
-    # 5. Push .zkey directly to internal storage (AFTER fresh APK install)
+    # 5.
+    # Push .zkey directly to internal storage (AFTER fresh APK install)
     TEMP_STAGE="/data/local/tmp/temp_circuit.zkey"
     adb_cmd push "$ZKEY_PATH" "$TEMP_STAGE" > /dev/null
     adb_cmd shell "chmod 666 ${TEMP_STAGE}"
@@ -110,77 +117,85 @@ for circuit_dir in "${CIRCUIT_DIRS[@]}"; do
     adb_cmd shell "rm -f ${TEMP_STAGE}"
     echo "[+] Staged and copied ${CIRCUIT_NAME}.zkey to app storage"
 
-    # 6. Clear Logcat buffer
-    adb_cmd logcat -c
+    # 6.
+    # Benchmark and collect data
+    for i in $(seq 1 $SAMPLE_SIZE); do
+    	echo "Test ${i}"
+        
+        # 6.1 Clear Logcat buffer
+    	adb_cmd logcat -c
 
-    # 7. Launch app cleanly in benchmark mode
-    echo "[+] Force-stopping old instance and launching app via ADB Intent..."
-    adb_cmd shell am force-stop "${PACKAGE_NAME}"
-    sleep 1
+    	# 6.2 Launch app cleanly in benchmark mode
+    	echo "[+] Force-stopping old instance and launching app via ADB Intent..."
+    	adb_cmd shell am force-stop "${PACKAGE_NAME}"
+    	sleep 1
 
-    adb_cmd shell am start -S \
-        -n "${PACKAGE_NAME}/.MainActivity" \
-        --ez benchmark_mode true \
-        --es target_circuit "${CIRCUIT_NAME}" > /dev/null
+    	adb_cmd shell am start -S \
+            -n "${PACKAGE_NAME}/.MainActivity" \
+            --ez benchmark_mode true \
+            --es target_circuit "${CIRCUIT_NAME}" > /dev/null
+        
+        # 6.3
+	    # Non-blocking capture loop with Timeout & Crash detection
+	    echo "[+] Awaiting cryptographic execution metrics..."
+	    JSON_STR=""
+	    TIMEOUT=60
+	    ELAPSED=0
 
-    # 8. Non-blocking loop with timeout & crash detection
-    echo "[+] Awaiting cryptographic execution metrics..."
-    JSON_STR=""
-    TIMEOUT=60
-    ELAPSED=0
+	    while [ -z "$JSON_STR" ]; do
+            sleep 2
+            ELAPSED=$((ELAPSED + 2))
 
-    while [ -z "$JSON_STR" ]; do
+            # Check if app process died unexpectedly (OOM / Exception)
+            PID=$(adb_cmd shell pidof "${PACKAGE_NAME}" || true)
+            if [ -z "$PID" ] && [ "$ELAPSED" -gt 4 ]; then
+                echo "Error: App process died unexpectedly (likely OOM crash on large circuit)." >&2
+                echo "${CIRCUIT_NAME},ERROR_APP_CRASHED,,,,,false" >> "$RESULTS_CSV"
+                break
+            fi
+
+            if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
+                echo "Error: Timed out waiting for benchmark log output (${TIMEOUT}s)." >&2
+                echo "${CIRCUIT_NAME},ERROR_TIMEOUT,,,,,,,,false" >> "$RESULTS_CSV"
+                break
+            fi
+
+            # Safely fetch log output (added `|| true` to prevent `set -eo pipefail` abort)
+            JSON_STR=$(adb_cmd logcat -d -v raw -s "CIVIC_BENCHMARK:I" | grep "{" | head -n 1 || true)
+        done
+
+        # Skip CSV parsing on error/timeout to prevent duplicate null rows
+        if [ -z "$JSON_STR" ]; then
+            echo "[!] Skipping parsing for ${CIRCUIT_NAME} due to error/timeout."
+            sleep 2
+            continue
+        fi
+
+        echo ">>> Output Received:"
+        echo "$JSON_STR"
+
+        # 6.4
+        # Parse JSON and append to CSV using jq
+        if command -v jq &> /dev/null; then
+            PROOF_GEN=$(echo "$JSON_STR" | jq -r '.witnessAndProofGenTimeMs')
+            LOCAL_VER=$(echo "$JSON_STR" | jq -r '.localVerificationTimeMs')
+            TOTAL_ENGINE=$(echo "$JSON_STR" | jq -r '.totalEngineTimeMs')
+            SIZE=$(echo "$JSON_STR" | jq -r '.proofSizeInBytes')
+            SERVER_TIME=$(echo "$JSON_STR" | jq -r '.serverProcessingTimeMs')
+            HEAP_DELTA=$(echo "$JSON_STR" | jq -r '.nativeHeapDeltaMb')
+            VM_HWM=$(echo "$JSON_STR" | jq -r '.vmHwmMb')
+            THERMAL=$(echo "$JSON_STR" | jq -r '.thermalStatus')
+            SUCCESS=$(echo "$JSON_STR" | jq -r '.success')
+
+            echo "${CIRCUIT_NAME},${PROOF_GEN},${LOCAL_VER},${TOTAL_ENGINE},${SIZE},${SERVER_TIME},${HEAP_DELTA},${VM_HWM},${THERMAL},${SUCCESS}" >> "$RESULTS_CSV"      
+            echo "Recorded metrics to $RESULTS_CSV"
+            else
+            echo "${CIRCUIT_NAME},RAW_JSON: ${JSON_STR}" >> "$RESULTS_CSV"
+        fi
+
+        # Allow 2-second cooldown for memory garbage collection
         sleep 2
-        ELAPSED=$((ELAPSED + 2))
-
-        # Check if app process died unexpectedly (OOM / Exception)
-        PID=$(adb_cmd shell pidof "${PACKAGE_NAME}" || true)
-        if [ -z "$PID" ] && [ "$ELAPSED" -gt 4 ]; then
-            echo "Error: App process died unexpectedly (likely OOM crash on large circuit)." >&2
-            echo "${CIRCUIT_NAME},ERROR_APP_CRASHED,,,,,false" >> "$RESULTS_CSV"
-            break
-        fi
-
-        if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
-            echo "Error: Timed out waiting for benchmark log output (${TIMEOUT}s)." >&2
-            echo "${CIRCUIT_NAME},ERROR_TIMEOUT,,,,,,,,false" >> "$RESULTS_CSV"
-            break
-        fi
-
-        # Fetch log output (added `|| true` to prevent `set -eo pipefail` from aborting)
-        JSON_STR=$(adb_cmd logcat -d -v raw -s "CIVIC_BENCHMARK:I" | grep "{" | head -n 1 || true)
     done
-
-    # Skip CSV parsing on error/timeout to prevent duplicate null rows
-    if [ -z "$JSON_STR" ]; then
-        echo "[!] Skipping parsing for ${CIRCUIT_NAME} due to error/timeout."
-        sleep 2
-        continue
-    fi
-
-    echo ">>> Output Received:"
-    echo "$JSON_STR"
-
-    # 9. Parse JSON and append to CSV using jq
-    if command -v jq &> /dev/null; then
-        PROOF_GEN=$(echo "$JSON_STR" | jq -r '.proofGenTimeMs')
-        WITNESS_GEN=$(echo "$JSON_STR" | jq -r '.witnessGenTimeMs')
-        TOTAL_ENGINE=$(echo "$JSON_STR" | jq -r '.totalEngineTimeMs')
-        SIZE=$(echo "$JSON_STR" | jq -r '.proofSizeInBytes')
-        SERVER_TIME=$(echo "$JSON_STR" | jq -r '.serverProcessingTimeMs')
-        HEAP_DELTA=$(echo "$JSON_STR" | jq -r '.nativeHeapDeltaMb')
-        VM_HWM=$(echo "$JSON_STR" | jq -r '.vmHwmMb')
-        THERMAL=$(echo "$JSON_STR" | jq -r '.thermalStatus')
-        SUCCESS=$(echo "$JSON_STR" | jq -r '.success')
-
-        echo "${CIRCUIT_NAME},${PROOF_GEN},${WITNESS_GEN},${TOTAL_ENGINE},${SIZE},${SERVER_TIME},${HEAP_DELTA},${VM_HWM},${THERMAL},${SUCCESS}" >> "$RESULTS_CSV"
-        echo "Recorded metrics to $RESULTS_CSV"
-    else
-        echo "${CIRCUIT_NAME},RAW_JSON: ${JSON_STR}" >> "$RESULTS_CSV"
-    fi
-
-    # Allow 2-second cooldown for memory garbage collection
-    sleep 2
 done
 
 echo ""
