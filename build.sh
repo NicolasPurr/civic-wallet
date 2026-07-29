@@ -117,12 +117,20 @@ for circuit_path in "${CIRCUIT_FILES[@]}"; do
     rm -rf "${MOPRO_TARGET:?}"/*
     cp "${TMP_DIR}/${CIRCUIT_NAME}_js/${CIRCUIT_NAME}.wasm" "${MOPRO_TARGET}/cbdc.wasm"
     cp "$ZKEY_FINAL" "${MOPRO_TARGET}/cbdc.zkey"
+    
+    # Clean w2c2 files
+    find "${MOPRO_DIR}/build" -type d -name "mopro-*" -exec rm -rf {} + 2>/dev/null || true
+
+    # Turn off strict C99 errors in Clangu NDK r27b
+    export CFLAGS="-Wno-implicit-function-declaration -Wno-error=implicit-function-declaration"
+    export CFLAGS_x86_64_linux_android="${CFLAGS}"
+    export CFLAGS_aarch64_linux_android="${CFLAGS}"
 
     pushd "$MOPRO_DIR" > /dev/null
-    cargo clean
+
     mopro build
     popd > /dev/null
-
+    
     # Locate generated bindings and jniLibs
     MOPRO_KT=$(find "$MOPRO_DIR" -name "mopro.kt" | head -n 1)
     MOPRO_JNILIBS=$(find "$MOPRO_DIR" -type d -name "jniLibs" | head -n 1)
