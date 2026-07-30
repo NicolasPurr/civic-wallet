@@ -5,17 +5,31 @@
 
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
-use std::{fs::File, io::BufReader, str::FromStr, time::Instant};
+use std::{
+    fs::File,
+    io::BufReader,
+    str::FromStr,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
 use ark_bn254::{Bn254, Fq, Fq2, Fr, G1Affine, G2Affine};
+use ark_ec::AffineRepr;
 use ark_groth16::{Groth16, PreparedVerifyingKey, Proof, VerifyingKey};
 use ark_snark::SNARK;
 use tower_http::cors::CorsLayer;
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
-/// Server connection status to temporary relational SQLite DB in RAM
+/// Global request counter to guarantee unique database insertion keys during benchmarks
+static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Server connection status to temporary relational SQLite DB
 #[derive(Clone)]
 struct AppState {
     db: SqlitePool,
+    pvk: Arc<PreparedVerifyingKey<Bn254>>,
 }
 
 /// SnarkJs JSON representation of a Groth16 proof
@@ -72,22 +86,36 @@ fn parse_fq(s: &str) -> Fq {
 
 /// Converts a SnarkJS $G_1$ coordinate array `[x, y, z]` to an Arkworks [`G1Affine`].
 ///
-/// SnarkJS uses homogeneous coordinates where `arr[2]` is $Z$ (typically `"1"`).
-/// This extracts $X$ (`arr[0]`) and $Y$ (`arr[1]`) into affine form.
-fn parse_g1(arr: &[String; 3]) -> G1Affine {
+/// Performs explicit on-curve validation ($y^2 = x^3 + ax + b$) and prime-order subgroup checks.
+fn parse_g1(arr: &[String; 3]) -> Result<G1Affine, String> {
     let x = parse_fq(&arr[0]);
     let y = parse_fq(&arr[1]);
-    G1Affine::new_unchecked(x, y)
+    let point = G1Affine::new_unchecked(x, y);
+
+    if !point.is_on_curve() || !point.is_in_correct_subgroup_assuming_on_curve() {
+        return Err("G1 point failed on-curve or subgroup validation".to_string());
+    }
+
+    Ok(point)
 }
 
 /// Converts a SnarkJS $G_2$ coordinate matrix to an Arkworks [`G2Affine`].
 ///
-/// $G_2$ elements lie in $\mathbb{F}_{q^2}$, so each coordinate requires two base field
-/// coefficients `[c0, c1]`.
-fn parse_g2(arr: &[[String; 2]; 3]) -> G2Affine {
+/// Performs explicit on-curve validation and prime-order subgroup checks over $\mathbb{F}_{q^2}$.
+///
+/// # Errors
+///
+/// Returns an `Err` if the point is not in the correct subgroup.
+fn parse_g2(arr: &[[String; 2]; 3]) -> Result<G2Affine, String> {
     let x = Fq2::new(parse_fq(&arr[0][0]), parse_fq(&arr[0][1]));
     let y = Fq2::new(parse_fq(&arr[1][0]), parse_fq(&arr[1][1]));
-    G2Affine::new_unchecked(x, y)
+    let point = G2Affine::new_unchecked(x, y);
+
+    if !point.is_on_curve() || !point.is_in_correct_subgroup_assuming_on_curve() {
+        return Err("G2 point failed on-curve or subgroup validation".to_string());
+    }
+
+    Ok(point)
 }
 
 /// Loads and processes the verification key directly from disk
@@ -103,18 +131,20 @@ fn load_pvk() -> Result<PreparedVerifyingKey<Bn254>, String> {
     let raw_vk: SnarkJsVk = serde_json::from_reader(reader)
         .map_err(|e| format!("Failed to parse VK JSON: {e}"))?;
 
+    let gamma_abc_g1: Result<Vec<G1Affine>, String> = raw_vk.ic.iter().map(parse_g1).collect();
+
     let vk = VerifyingKey::<Bn254> {
-        alpha_g1: parse_g1(&raw_vk.vk_alpha_1),
-        beta_g2: parse_g2(&raw_vk.vk_beta_2),
-        gamma_g2: parse_g2(&raw_vk.vk_gamma_2),
-        delta_g2: parse_g2(&raw_vk.vk_delta_2),
-        gamma_abc_g1: raw_vk.ic.iter().map(parse_g1).collect(),
+        alpha_g1: parse_g1(&raw_vk.vk_alpha_1)?,
+        beta_g2: parse_g2(&raw_vk.vk_beta_2)?,
+        gamma_g2: parse_g2(&raw_vk.vk_gamma_2)?,
+        delta_g2: parse_g2(&raw_vk.vk_delta_2)?,
+        gamma_abc_g1: gamma_abc_g1?,
     };
 
     Groth16::<Bn254>::process_vk(&vk).map_err(|e| format!("Failed to process VK: {e:?}"))
 }
 
-/// Initialises a temporary DB in RAM and generates 10M records.
+/// Initialises a database instance and generates 10M records.
 async fn init_db() -> SqlitePool {
     let pool = SqlitePoolOptions::new()
         .max_connections(50)
@@ -122,15 +152,15 @@ async fn init_db() -> SqlitePool {
         .await
         .unwrap();
 
-    // Turn off journal mode and synchronisation
-    sqlx::query("PRAGMA journal_mode = OFF;").execute(&pool).await.unwrap();
-    sqlx::query("PRAGMA synchronous = OFF;").execute(&pool).await.unwrap();
+    // Use WAL mode and standard synchronization for realistic concurrent read/write behaviour
+    sqlx::query("PRAGMA journal_mode = WAL;").execute(&pool).await.unwrap();
+    sqlx::query("PRAGMA synchronous = NORMAL;").execute(&pool).await.unwrap();
 
     // Create tables without primary keys
     sqlx::query("CREATE TABLE nullifiers (nullifier TEXT);").execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE blacklist (item TEXT);").execute(&pool).await.unwrap();
 
-    println!("Generating 10M records in RAM...");
+    println!("Generating 10M records in DB...");
     let start_seed = Instant::now();
 
     // Insert 1K values in one query
@@ -169,16 +199,23 @@ async fn init_db() -> SqlitePool {
         .await
         .unwrap();
 
-    println!("Databasae ready in RAM. Execution: {:.2?}", start_seed.elapsed());
+    println!("Database ready. Execution: {:.2?}", start_seed.elapsed());
 
     pool
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Generating an SQL DB in RAM on server startup
+    // Bind TCP listener first so port conflicts fail immediately before loading DB
+    let bind_addr = "0.0.0.0:8080";
+    let listener = tokio::net::TcpListener::bind(bind_addr).await.unwrap();
+
+    // Generating SQL DB on server startup
     let pool = init_db().await;
-    let state = AppState { db: pool };
+
+    // Load VK once on startup to isolate proof verification latency from disk I/O
+    let pvk = Arc::new(load_pvk().expect("Failed to load verification key at startup"));
+    let state = AppState { db: pool, pvk };
 
     // Build application routes & attach middleware
     let app = Router::new()
@@ -187,9 +224,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    // Bind TCP listener to all network interfaces
-    let bind_addr = "0.0.0.0:8080";
-    let listener = tokio::net::TcpListener::bind(bind_addr).await.unwrap();
     println!("Proof verifier listening on http://{bind_addr}");
 
     // Start the Axum web server
@@ -201,7 +235,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Axum HTTP endpoint that validates incoming Groth16 ZK proofs against public inputs.
 ///
 /// # Request Processing Flow
-/// 1. Loads and prepares the BN254 verification key.
+/// 1. Pre-loaded BN254 verification key is fetched from application state.
 /// 2. Converts base-10 input strings into scalar field elements ([`Fr`]).
 /// 3. Converts SnarkJS coordinate arrays into Arkworks elliptic curve points ([`G1Affine`], [`G2Affine`]).
 /// 4. Executes pairing checks via [`Groth16`] verification over BN254.
@@ -210,7 +244,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// # HTTP Responses
 ///
 /// * `200 OK` - Proof was evaluated successfully. Check `body.valid` for the outcome.
-/// * `500 Internal Server Error` - Failed to read or parse the verification key.
+/// * `500 Internal Server Error` - Internal processing error.
 async fn verify_handler(
     State(state): State<AppState>,
     Json(payload): Json<VerifyRequest>,
@@ -218,16 +252,19 @@ async fn verify_handler(
     let start = Instant::now();
 
     println!("Received verification request:");
-    
+
     // Get the nullifier
-    let nullifier = payload.public_inputs.first().expect("Missing nullifier in public_inputs");
+    let nullifier = payload
+        .public_inputs
+        .first()
+        .ok_or(StatusCode::BAD_REQUEST)?;
 
     // Blacklist check
     let is_blacklisted: Option<(String,)> = sqlx::query_as("SELECT item FROM blacklist WHERE item = ? LIMIT 1")
         .bind(nullifier)
         .fetch_optional(&state.db)
         .await
-        .unwrap();
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if is_blacklisted.is_some() {
         println!("REJECT (Blacklisted nullifier in SQL DB)\n");
@@ -238,15 +275,19 @@ async fn verify_handler(
         }));
     }
 
-    // Nullifier check
-    let is_present: Option<(String,)> = sqlx::query_as("SELECT nullifier FROM nullifiers WHERE nullifier = ? LIMIT 1")
-        .bind(nullifier)
-        .fetch_optional(&state.db)
-        .await
-        .unwrap();
+    // BENCHMARKING ONLY: Generate a unique entry per request to force a full SQLite B-Tree write
+    // and page allocation on every iteration, accurately measuring database write latency.
+    let req_id = REQUEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mock_nullifier_entry = format!("{nullifier}_{req_id}");
 
-    if is_present.is_some() {
-        println!("REJECT (Nullifier present in SQL DB)\n");
+    let result = sqlx::query("INSERT INTO nullifiers (nullifier) VALUES (?)")
+        .bind(&mock_nullifier_entry)
+        .execute(&state.db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if result.rows_affected() == 0 {
+        println!("REJECT (Nullifier double-spend conflict)\n");
         let duration = start.elapsed().as_secs_f64() * 1000.0;
         return Ok(Json(VerifyResponse {
             valid: false,
@@ -254,31 +295,30 @@ async fn verify_handler(
         }));
     }
 
-    // Load the verification key from disk
-    // NOTE: very comfy for frequent key updates
-    let pvk = load_pvk().map_err(|err| {
-        eprintln!("Error loading VK: {}", err);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    // Offload CPU-bound cryptographic verification to blocking task pool
+    let pvk = Arc::clone(&state.pvk);
+    let is_valid = tokio::task::spawn_blocking(move || {
+        // Parse string inputs into scalar field elements (`Fr`)
+        // WARNING: `unwrap()` will panic on malformed client strings, returning an unhandled 500
+        let public_inputs: Vec<Fr> = payload
+            .public_inputs
+            .iter()
+            .map(|s| Fr::from_str(s).unwrap())
+            .collect();
 
-    // Parse string inputs into scalar field elements (`Fr`)
-    // WARNING: `unwrap()` will panic on malformed client strings, returning an unhandled 500
-    let public_inputs: Vec<Fr> = payload
-        .public_inputs
-        .iter()
-        .map(|s| Fr::from_str(s).unwrap())
-        .collect();
+        // Map SnarkJS JSON format to Arkworks Proof structure with subgroup validation
+        let proof = Proof::<Bn254> {
+            a: parse_g1(&payload.proof.pi_a).unwrap(),
+            b: parse_g2(&payload.proof.pi_b).unwrap(),
+            c: parse_g1(&payload.proof.pi_c).unwrap(),
+        };
 
-    // Map SnarkJS JSON format to Arkworks Proof structure
-    let proof = Proof::<Bn254> {
-        a: parse_g1(&payload.proof.pi_a),
-        b: parse_g2(&payload.proof.pi_b),
-        c: parse_g1(&payload.proof.pi_c),
-    };
-
-    // Perform pairing-based cryptographic verification
-    let is_valid = Groth16::<Bn254>::verify_with_processed_vk(&pvk, &public_inputs, &proof)
-        .unwrap_or(false);
+        // Perform pairing-based cryptographic verification using pre-loaded VK from state
+        Groth16::<Bn254>::verify_with_processed_vk(&pvk, &public_inputs, &proof)
+            .unwrap_or(false)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let duration = start.elapsed().as_secs_f64() * 1000.0;
 
