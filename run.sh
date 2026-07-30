@@ -95,7 +95,34 @@ for circuit_dir in "${CIRCUIT_DIRS[@]}"; do
     # Update verification key for Axum backend server
     if [ -d "$SERVER_DIR" ]; then
         cp "$VKEY_PATH" "${SERVER_DIR}/verification_key.json"
-        #pkill -f "verification-server" || true
+
+        # Kill the server
+        pkill -f "verification-server" || true
+        sleep 1
+
+        # Save current directory and move into SERVER_DIR
+        pushd "$SERVER_DIR" > /dev/null
+
+        # Start in background
+        nohup cargo run --release > server.log 2>&1 &
+
+        # Return to previous directory
+        popd > /dev/null
+
+        echo "[+] Waiting for verification server to bind port 8080..."
+        MAX_RETRIES=120
+        RETRY_COUNT=0
+        until nc -z localhost 8080 || [ $RETRY_COUNT -eq $MAX_RETRIES ]; do
+            sleep 1
+            RETRY_COUNT=$((RETRY_COUNT+1))
+        done
+
+        if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+            echo "Error: Verification server failed to start within 60s. Checking server.log:" >&2
+            cat server.log
+            exit 1
+        fi
+
         echo "[+] Updated Axum server verification key"
     fi
 
@@ -121,7 +148,7 @@ for circuit_dir in "${CIRCUIT_DIRS[@]}"; do
     # Benchmark and collect data
     for i in $(seq 1 $SAMPLE_SIZE); do
     	echo "Test ${i}"
-        
+
         # 6.1 Clear Logcat buffer
     	adb_cmd logcat -c
 
@@ -134,7 +161,7 @@ for circuit_dir in "${CIRCUIT_DIRS[@]}"; do
             -n "${PACKAGE_NAME}/.MainActivity" \
             --ez benchmark_mode true \
             --es target_circuit "${CIRCUIT_NAME}" > /dev/null
-        
+
         # 6.3
 	    # Non-blocking capture loop with Timeout & Crash detection
 	    echo "[+] Awaiting cryptographic execution metrics..."
