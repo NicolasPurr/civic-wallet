@@ -3,7 +3,7 @@ package io.github.nicolaspurr.civicwallet.feature.payment.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import io.github.nicolaspurr.civicwallet.core.zk.ZkCircuitInput
+import io.github.nicolaspurr.civicwallet.core.zk.CircuitInput
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.BiometricSessionOrchestrator
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.interactor.ZkProofInteractor
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -61,7 +61,7 @@ class MainViewModel @Inject constructor(
      * and notifies the UI to navigate to the biometric scan screen.
      */
     fun onInitiateWithBiometrics(
-        circuitInput: ZkCircuitInput
+        circuitInput: CircuitInput
     ) {
         viewModelScope.launch {
             biometricSessionOrchestrator.start(circuitInput)
@@ -77,7 +77,7 @@ class MainViewModel @Inject constructor(
      *
      */
     fun onInitiateBypassBiometrics(
-        circuitInput: ZkCircuitInput
+        circuitInput: CircuitInput
     ) {
         viewModelScope.launch {
             zkProofInteractor.execute(circuitInput)

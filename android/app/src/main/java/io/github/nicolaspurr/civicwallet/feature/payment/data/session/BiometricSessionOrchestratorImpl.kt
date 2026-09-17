@@ -4,7 +4,7 @@ import io.github.nicolaspurr.civicwallet.core.di.DefaultDispatcher
 import io.github.nicolaspurr.civicwallet.core.hardware.BiometricAuthenticator
 import io.github.nicolaspurr.civicwallet.core.ml.ModelManager
 import io.github.nicolaspurr.civicwallet.core.ml.ModelState
-import io.github.nicolaspurr.civicwallet.core.zk.ZkCircuitInput
+import io.github.nicolaspurr.civicwallet.core.zk.CircuitInput
 import io.github.nicolaspurr.civicwallet.core.zk.ZkProofEngine
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.BiometricSessionOrchestrator
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.SessionState
@@ -70,8 +70,8 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
 
     /** Holds the active target input contract for the current payment session. */
 
-    private var activeCircuitInput: ZkCircuitInput? = null
-    override fun start(circuitInput: ZkCircuitInput) {
+    private var activeCircuitInput: CircuitInput? = null
+    override fun start(circuitInput: CircuitInput) {
         if (activeJob?.isActive == true) return
 
         this.activeCircuitInput = circuitInput
@@ -150,7 +150,7 @@ class BiometricSessionOrchestratorImpl @Inject constructor(
     /**
      * Executes the ZK computation pipeline asynchronously.
      */
-    private suspend fun executeProofPipeline(circuitInput: ZkCircuitInput) {
+    private suspend fun executeProofPipeline(circuitInput: CircuitInput) {
         // Delegated directly to the Interactor use case
         zkProofInteractor.execute(circuitInput)
             .onSuccess {

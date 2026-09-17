@@ -6,7 +6,7 @@ import androidx.lifecycle.viewModelScope
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.BiometricSessionOrchestrator
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.SessionState
 import dagger.hilt.android.lifecycle.HiltViewModel
-import io.github.nicolaspurr.civicwallet.core.zk.ZkCircuitInput
+import io.github.nicolaspurr.civicwallet.core.zk.CircuitInput
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,11 +48,11 @@ class BiometricViewModel @Inject constructor(
     }
 
     /**
-     * Explicitly starts the biometric scanning session bound to a specific [ZkCircuitInput] contract.
+     * Explicitly starts the biometric scanning session bound to a specific [CircuitInput] contract.
      *
      * @param circuitInput The target circuit parameters (e.g., Tier 2 Velocity, Tier 3 Merkle).
      */
-    fun startSession(circuitInput: ZkCircuitInput) {
+    fun startSession(circuitInput: CircuitInput) {
         orchestrator.start(circuitInput)
     }
 

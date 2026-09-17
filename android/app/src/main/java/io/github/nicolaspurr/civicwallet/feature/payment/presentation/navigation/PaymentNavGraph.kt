@@ -20,7 +20,7 @@ import io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen.Sca
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen.SuccessScreen
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen.UnauthorizedScreen
 import io.github.nicolaspurr.civicwallet.feature.payment.presentation.screen.VerifyingScreen
-import io.github.nicolaspurr.civicwallet.core.zk.ZkCircuitInput
+import io.github.nicolaspurr.civicwallet.core.zk.CircuitInput
 
 
 /**
@@ -34,7 +34,7 @@ import io.github.nicolaspurr.civicwallet.core.zk.ZkCircuitInput
 @Composable
 fun PaymentNavGraph(
     navController: NavHostController,
-    circuitInput: ZkCircuitInput,
+    circuitInput: CircuitInput,
     isBenchmarkMode: Boolean = false,
     onBenchmarkComplete: () -> Unit = {}
 ) {

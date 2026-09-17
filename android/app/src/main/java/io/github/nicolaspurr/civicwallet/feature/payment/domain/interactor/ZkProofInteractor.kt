@@ -1,6 +1,6 @@
 package io.github.nicolaspurr.civicwallet.feature.payment.domain.interactor
 
-import io.github.nicolaspurr.civicwallet.core.zk.ZkCircuitInput
+import io.github.nicolaspurr.civicwallet.core.zk.CircuitInput
 import io.github.nicolaspurr.civicwallet.feature.payment.domain.session.PaymentSessionRepository
 import io.github.nicolaspurr.civicwallet.core.zk.ZkProofEngine
 import javax.inject.Inject
@@ -29,7 +29,7 @@ class ZkProofInteractor @Inject constructor(
 
 
     /**
-     * Accepts ANY polymorphic [ZkCircuitInput], generates the proof,
+     * Accepts ANY polymorphic [CircuitInput], generates the proof,
      * and persists metrics into [PaymentSessionRepository].
      *
      * On successful generation, the resulting proof payload and engine timing metrics
@@ -38,7 +38,7 @@ class ZkProofInteractor @Inject constructor(
      * @param circuitInput Input contract for the circuit
      * @return A [Result] indicating whether the proof was successfully generated and stored.
      */
-    suspend fun execute(circuitInput: ZkCircuitInput): Result<Unit> {
+    suspend fun execute(circuitInput: CircuitInput): Result<Unit> {
         if (isGenerating) {
             return Result.failure(IllegalStateException("Proof generation already ongoing."))
         }

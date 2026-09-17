@@ -19,5 +19,5 @@ interface ZkProofEngine {
      * @return A [Result] holding [ZkProofResult] metrics on successful generation, or an error if
      * witness/proof steps fail.
      */
-    suspend fun generateProof(circuitInput: ZkCircuitInput): Result<ZkProofResult>
+    suspend fun generateProof(circuitInput: CircuitInput): Result<ZkProofResult>
 }
