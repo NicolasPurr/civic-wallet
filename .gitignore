@@ -25,3 +25,22 @@ Thumbs.db
 # zk-verification-server
 zk-verification-server/payload.json
 zk-verification-server/verification_key.json
+circuit-generation/generated/
+circuit-generation/artifacts/
+build/
+logs/
+*.ptau
+verification-server/verification_key.json
+android/app/src/main/jniLibs/
+android/app/src/main/assets/cbdc.zkey
+android/app/src/main/assets/zk_fixtures/
+node_modules/
+circuit-generation/mopro/MoproAndroidBindings/
+circuit-generation/mopro/test-vectors/circom/cbdc.wasm
+circuit-generation/mopro/test-vectors/circom/cbdc.zkey
+/benchmark_results.csv
+/benchmark_raw.tsv
+verification-server/server.log
+archive/
+circuit-generation/archive/
+results/old_pipeline/
