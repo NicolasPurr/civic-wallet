@@ -91,4 +91,3 @@ enum class CircuitType(
             get() = entries.filter { it != ADVANCED_UNION_BL160 }
     }
 }
-

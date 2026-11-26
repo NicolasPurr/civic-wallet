@@ -64,37 +64,16 @@ fn parse_fq(s: &str) -> Fq {
     Fq::from_str(s).unwrap_or_else(|_| panic!("Failed to parse Fq: {}", s))
 }
 
-<<<<<<< Updated upstream
-/// Converts a SnarkJS $G_1$ coordinate array `[x, y, z]` to an Arkworks [`G1Affine`].
-///
-/// SnarkJS uses homogeneous coordinates where `arr[2]` is $Z$ (typically `"1"`).
-/// This extracts $X$ (`arr[0]`) and $Y$ (`arr[1]`) into affine form.
-fn parse_g1(arr: &[String; 3]) -> G1Affine {
-=======
 /// Converts G1 coordinates [x, y, ...] to an Arkworks [`G1Affine`].
 fn parse_g1(arr: &[String]) -> Result<G1Affine, String> {
     if arr.len() < 2 {
         return Err("G1 point requires at least 2 coordinates (x, y)".to_string());
     }
->>>>>>> Stashed changes
     let x = parse_fq(&arr[0]);
     let y = parse_fq(&arr[1]);
-    G1Affine::new_unchecked(x, y)
+    Ok(G1Affine::new_unchecked(x, y))
 }
 
-<<<<<<< Updated upstream
-/// Converts a SnarkJS $G_2$ coordinate matrix to an Arkworks [`G2Affine`].
-///
-/// $G_2$ elements lie in $\mathbb{F}_{q^2}$, so each coordinate requires two base field
-/// coefficients `[c0, c1]`.
-fn parse_g2(arr: &[[String; 2]; 3]) -> G2Affine {
-    let x = Fq2::new(parse_fq(&arr[0][0]), parse_fq(&arr[0][1]));
-    let y = Fq2::new(parse_fq(&arr[1][0]), parse_fq(&arr[1][1]));
-    G2Affine::new_unchecked(x, y)
-}
-
-/// Loads and processes the verification key directly from disk
-=======
 /// Converts G2 coordinates [[x0, x1], [y0, y1], ...] to an Arkworks [`G2Affine`].
 fn parse_g2(arr: &[[String; 2]]) -> Result<G2Affine, String> {
     if arr.len() < 2 {
@@ -109,8 +88,9 @@ fn parse_g2(arr: &[[String; 2]]) -> Result<G2Affine, String> {
     }
 
     Ok(point)
-}/// Loads and processes the verification key directly from disk
->>>>>>> Stashed changes
+}
+
+/// Loads and processes the verification key directly from disk
 ///
 /// # Errors
 ///
@@ -123,21 +103,24 @@ fn load_pvk() -> Result<PreparedVerifyingKey<Bn254>, String> {
     let raw_vk: SnarkJsVk = serde_json::from_reader(reader)
         .map_err(|e| format!("Failed to parse VK JSON: {e}"))?;
 
-<<<<<<< Updated upstream
-=======
     let gamma_abc_g1: Result<Vec<G1Affine>, String> = raw_vk.ic.iter().map(|arr| parse_g1(arr)).collect();
 
 
->>>>>>> Stashed changes
     let vk = VerifyingKey::<Bn254> {
-        alpha_g1: parse_g1(&raw_vk.vk_alpha_1),
-        beta_g2: parse_g2(&raw_vk.vk_beta_2),
-        gamma_g2: parse_g2(&raw_vk.vk_gamma_2),
-        delta_g2: parse_g2(&raw_vk.vk_delta_2),
-        gamma_abc_g1: raw_vk.ic.iter().map(parse_g1).collect(),
+        alpha_g1: parse_g1(&raw_vk.vk_alpha_1)?,
+        beta_g2: parse_g2(&raw_vk.vk_beta_2)?,
+        gamma_g2: parse_g2(&raw_vk.vk_gamma_2)?,
+        delta_g2: parse_g2(&raw_vk.vk_delta_2)?,
+        gamma_abc_g1: gamma_abc_g1?,
     };
 
     Groth16::<Bn254>::process_vk(&vk).map_err(|e| format!("Failed to process VK: {e:?}"))
+}
+
+/// Logs why a proof could not be parsed and answers 400 Bad Request.
+fn reject_proof(err: String) -> StatusCode {
+    eprintln!("Rejected proof: {err}");
+    StatusCode::BAD_REQUEST
 }
 
 #[tokio::main]
@@ -194,9 +177,9 @@ async fn verify_handler(
 
         // Map SnarkJS JSON format to Arkworks Proof structure
     let proof = Proof::<Bn254> {
-        a: parse_g1(&payload.proof.pi_a),
-        b: parse_g2(&payload.proof.pi_b),
-        c: parse_g1(&payload.proof.pi_c),
+        a: parse_g1(&payload.proof.pi_a).map_err(reject_proof)?,
+        b: parse_g2(&payload.proof.pi_b).map_err(reject_proof)?,
+        c: parse_g1(&payload.proof.pi_c).map_err(reject_proof)?,
     };
 
     // Perform pairing-based cryptographic verification
