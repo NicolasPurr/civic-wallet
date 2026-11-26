@@ -1,61 +1,70 @@
 #!/usr/bin/env bash
 #
-# verify_fixtures.sh — sprawdza, czy każdy wygenerowany wektor testowy
-# rzeczywiście spełnia ograniczenia swojego obwodu.
+# verify_fixtures.sh - check that every generated test vector satisfies its
+# circuit, by computing the witness and running a full prove + verify.
 #
-# Fakt, że generate_fixtures.mjs zakończył się bez błędu, niczego nie dowodzi:
-# skrypt liczy Poseidona niezależnie od obwodu. Rozjechanie się kolejności
-# argumentów w ścieżce Merkle'a albo sposobu truncacji klucza tożsamości
-# ujawni się dopiero tutaj — i lepiej, żeby ujawniło się na laptopie niż
-# w Rust FFI w środku serii pomiarowej na telefonie.
+# generate_fixtures.mjs computes Poseidon independently of the circuit, so it
+# finishing without errors proves nothing. A wrong argument order in the
+# Merkle path or a wrong truncation of the identity key only shows up here,
+# which is better than finding it on the phone in the middle of a benchmark.
 #
+# Usage (after ./build.sh and node tools/generate_fixtures.mjs):
+#   bash tools/verify_fixtures.sh
 set -euo pipefail
 
-ART_DIR="${ART_DIR:-circuit-generation/artifacts}"
-INPUTS="${INPUTS:-build/inputs}"
-OK=0; FAIL=0
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ART_DIR="${ART_DIR:-${ROOT_DIR}/circuit-generation/artifacts}"
+INPUTS="${INPUTS:-${ROOT_DIR}/build/inputs}"
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "$WORK_DIR"' EXIT
 
-# Weryfikujemy KOMPLETNE wejścia obwodu z build/inputs, nie wektory z assets.
-# Wektor w assets zawiera metadane (circuit, stateDepth) i nie zawiera parametrów
-# transakcji — generator świadka odrzuciłby go jako niezgodny z interfejsem.
+OK=0; FAIL=0; SKIP=0
+
+# Check the full circuit inputs from build/inputs, not the app test vectors:
+# those contain metadata (circuit, stateDepth) and lack the transaction
+# parameters, so the witness generator would reject them.
 if ! compgen -G "$INPUTS/*.input.json" > /dev/null; then
-  echo "Brak wejść w $INPUTS — uruchom: node tools/generate_fixtures.mjs" >&2
-  exit 1
+    echo "No inputs in $INPUTS - run: node tools/generate_fixtures.mjs" >&2
+    exit 1
 fi
 
 for f in "$INPUTS"/*.input.json; do
-  NAME=$(basename "$f" .input.json)
-  WASM="$ART_DIR/$NAME/${NAME}_js/${NAME}.wasm"
-  GEN="$ART_DIR/$NAME/${NAME}_js/generate_witness.js"
+    NAME=$(basename "$f" .input.json)
+    JS_DIR="$ART_DIR/$NAME/${NAME}_js"
+    WASM="$JS_DIR/${NAME}.wasm"
+    WTNS="$WORK_DIR/$NAME.wtns"
+    PROOF="$WORK_DIR/$NAME.proof.json"
+    PUBLIC="$WORK_DIR/$NAME.public.json"
+    LOG="$WORK_DIR/$NAME.log"
 
-  if [[ ! -f "$WASM" ]]; then
-    echo "SKIP  $NAME (brak $WASM — uruchom ./build.sh)"
-    continue
-  fi
-
-  if node "$GEN" "$WASM" "$f" "/tmp/$NAME.wtns" 2> "/tmp/$NAME.err"; then
-    # świadek policzony — sprawdź jeszcze pełną ścieżkę dowodzenia
-    if snarkjs groth16 prove \
-         "$ART_DIR/$NAME/$NAME.zkey" "/tmp/$NAME.wtns" \
-         "/tmp/$NAME.proof.json" "/tmp/$NAME.public.json" > /dev/null 2>&1 &&
-       snarkjs groth16 verify \
-         "$ART_DIR/$NAME/${NAME}_vkey.json" \
-         "/tmp/$NAME.public.json" "/tmp/$NAME.proof.json" > /dev/null 2>&1
-    then
-      SIGNALS=$(python3 -c "import json;print(len(json.load(open('/tmp/$NAME.public.json'))))")
-      echo "OK    $NAME  (sygnałów publicznych: $SIGNALS)"
-      OK=$((OK+1))
-    else
-      echo "FAIL  $NAME  — świadek policzony, ale dowód nie przechodzi"
-      FAIL=$((FAIL+1))
+    if [[ ! -f "$WASM" ]]; then
+        echo "SKIP  $NAME (no $WASM - run ./build.sh)"
+        SKIP=$((SKIP + 1))
+        continue
     fi
-  else
-    echo "FAIL  $NAME  — generowanie świadka:"
-    sed 's/^/          /' "/tmp/$NAME.err" | head -5
-    FAIL=$((FAIL+1))
-  fi
+
+    if ! node "$JS_DIR/generate_witness.js" "$WASM" "$f" "$WTNS" > "$LOG" 2>&1; then
+        echo "FAIL  $NAME - witness generation:"
+        sed 's/^/          /' "$LOG" | head -n 5
+        FAIL=$((FAIL + 1))
+        continue
+    fi
+
+    # The witness exists; now check the whole proving path.
+    if snarkjs groth16 prove "$ART_DIR/$NAME/$NAME.zkey" "$WTNS" "$PROOF" "$PUBLIC" > "$LOG" 2>&1 &&
+       snarkjs groth16 verify "$ART_DIR/$NAME/${NAME}_vkey.json" "$PUBLIC" "$PROOF" >> "$LOG" 2>&1
+    then
+        SIGNALS=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).length)' "$PUBLIC")
+        echo "OK    $NAME  (public signals: $SIGNALS)"
+        OK=$((OK + 1))
+    else
+        echo "FAIL  $NAME - witness computed, but the proof does not verify:"
+        sed 's/^/          /' "$LOG" | tail -n 5
+        FAIL=$((FAIL + 1))
+    fi
 done
 
 echo
-echo "OK: $OK   FAIL: $FAIL"
-[[ $FAIL -eq 0 ]]
+echo "OK: $OK   FAIL: $FAIL   SKIP: $SKIP"
+# Fail if anything failed, or if nothing was actually checked.
+[[ $FAIL -eq 0 && $OK -gt 0 ]]
